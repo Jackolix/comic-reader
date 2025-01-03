@@ -162,7 +162,11 @@ const ComicReader = () => {
     setError(null);
     try {
       if (comic.type === 'remote') {
-        const response = await fetch(`${comic.serverUrl}${comic.path}`, {
+        // Correctly encode the comic path, preserving the original structure
+        const filename = comic.path.split('/').pop();
+        const encodedPath = `/comics/${encodeURIComponent(decodeURIComponent(filename))}`;
+        
+        const response = await fetch(`${comic.serverUrl}${encodedPath}`, {
           method: 'GET',
           headers: {
             'Accept': 'application/zip',
