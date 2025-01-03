@@ -1,10 +1,11 @@
 import ComicReader from './components/ComicReader'
+import { ThemeProvider } from 'next-themes'
 
-function App() {
+function App({ Component, pageProps }) {
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
+    <ThemeProvider attribute="class">
       <ComicReader />
-    </div>
+    </ThemeProvider>
   )
 }
 

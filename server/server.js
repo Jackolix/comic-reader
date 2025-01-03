@@ -23,7 +23,7 @@ app.use((req, res, next) => {
 });
 
 // List all comics
-app.get('/api/comics', async (req, res) => {
+app.get('/comics', async (req, res) => {
   try {
     const files = await fs.readdir(COMICS_DIR);
     const comics = files
@@ -41,7 +41,7 @@ app.get('/api/comics', async (req, res) => {
 });
 
 // Get comic cover
-app.get('/api/covers/:filename', async (req, res) => {
+app.get('/covers/:filename', async (req, res) => {
   try {
     const filename = decodeURIComponent(req.params.filename);
     const filePath = path.join(COMICS_DIR, filename);
