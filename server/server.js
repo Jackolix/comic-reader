@@ -6,21 +6,12 @@ const JSZip = require('jszip');
 
 const app = express();
 
-// Configure CORS to allow file downloads
+// Configure CORS
 app.use(cors({
   exposedHeaders: ['Content-Length', 'Content-Type', 'Content-Disposition']
 }));
 
-// Configuration - use correct Windows path
 const COMICS_DIR = process.env.COMICS_DIR || '/comics';
-
-// Add headers for binary file transfer
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Content-Disposition');
-  next();
-});
 
 // List all comics
 app.get('/comics', async (req, res) => {
@@ -36,7 +27,7 @@ app.get('/comics', async (req, res) => {
     res.json(comics);
   } catch (error) {
     console.error('Error reading directory:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Failed to read comics directory' });
   }
 });
 
@@ -49,19 +40,16 @@ app.get('/covers/:filename', async (req, res) => {
     // Verify file exists
     await fs.access(filePath);
 
-    // Read the CBZ file
     const data = await fs.readFile(filePath);
     const zip = await JSZip.loadAsync(data);
     
-    // Get first image from the archive
     const imageFile = Object.entries(zip.files)
       .find(([name, file]) => !file.dir && name.match(/\.(jpg|jpeg|png|gif)$/i));
 
     if (!imageFile) {
-      throw new Error('No cover image found');
+      return res.status(404).json({ error: 'No cover image found in comic' });
     }
 
-    // Extract and send the cover image
     const [_, entry] = imageFile;
     const imageData = await entry.async('nodebuffer');
     
@@ -69,12 +57,16 @@ app.get('/covers/:filename', async (req, res) => {
     res.send(imageData);
   } catch (error) {
     console.error('Error serving cover:', error);
-    res.status(404).json({ error: 'Cover not found' });
+    if (error.code === 'ENOENT') {
+      res.status(404).json({ error: 'Comic file not found' });
+    } else {
+      res.status(500).json({ error: 'Failed to process comic cover' });
+    }
   }
 });
 
 // Get a specific comic
-app.get('/api/comics/:filename', async (req, res) => {
+app.get('/comics/:filename', async (req, res) => {
   try {
     const filename = decodeURIComponent(req.params.filename);
     const filePath = path.join(COMICS_DIR, filename);
@@ -82,25 +74,26 @@ app.get('/api/comics/:filename', async (req, res) => {
     // Verify file exists
     await fs.access(filePath);
 
-    // Set appropriate headers for file download
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     
-    // Stream the file instead of loading it all at once
     const stream = require('fs').createReadStream(filePath);
+    stream.on('error', (error) => {
+      console.error('Stream error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to stream comic file' });
+      }
+    });
+    
     stream.pipe(res);
   } catch (error) {
     console.error('Error serving comic:', error);
-    res.status(404).json({ error: 'Comic not found' });
+    if (error.code === 'ENOENT') {
+      res.status(404).json({ error: 'Comic file not found' });
+    } else {
+      res.status(500).json({ error: 'Failed to serve comic file' });
+    }
   }
-});
-
-// Status endpoint for debugging
-app.get('/api/status', (req, res) => {
-  res.json({
-    status: 'running',
-    comicsDir: COMICS_DIR
-  });
 });
 
 const PORT = process.env.PORT || 3000;
