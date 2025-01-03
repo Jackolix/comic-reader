@@ -31,7 +31,7 @@ app.get('/comics', async (req, res) => {
       .map(file => ({
         id: encodeURIComponent(file),
         name: file.replace(/\.cbz$/i, ''),
-        path: `/api/comics/${encodeURIComponent(file)}`
+        path: `/comics/${encodeURIComponent(file)}`
       }));
     res.json(comics);
   } catch (error) {
