@@ -80,7 +80,7 @@ const ComicReader = () => {
         name: comic.name,
         type: 'remote',
         serverUrl: normalizedUrl,
-        path: `/comics/${comic.id}`,
+        path: comic.path, // Use the exact path from the server
         cover: null,
         progress: 0
       }));
