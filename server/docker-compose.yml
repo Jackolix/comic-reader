@@ -1,12 +1,22 @@
-version: '3.8'
-
+---
 services:
   comic-server:
-    build: .
-    ports:
-      - "3000:3000"
+    image: ghcr.io/jackolix/comic-server:latest
     volumes:
-      - /path/to/your/comics:/comics  # Change this to your comics directory
+      - /path/to/your/comics:/comics
     environment:
       - COMICS_DIR=/comics
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.comic-server.rule=Host(`comics.jackolix.dev`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.comic-server.entrypoints=websecure"
+      - "traefik.http.routers.comic-server.tls=true"
+      - "traefik.http.routers.comic-server.tls.certresolver=cloudflare"
+      - "traefik.http.services.comic-server.loadbalancer.server.port=3000"
     restart: unless-stopped
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true
