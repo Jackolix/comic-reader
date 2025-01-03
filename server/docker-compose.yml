@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  comic-server:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - /path/to/your/comics:/comics  # Change this to your comics directory
+    environment:
+      - COMICS_DIR=/comics
+    restart: unless-stopped

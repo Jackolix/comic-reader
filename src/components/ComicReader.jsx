@@ -1,195 +1,356 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ZoomIn, ZoomOut } from 'lucide-react';
+import { ZoomIn, ZoomOut, Menu, FolderPlus, Globe } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import JSZip from 'jszip';
 
 const ComicReader = () => {
+  const [library, setLibrary] = useState([]);
+  const [currentComic, setCurrentComic] = useState(null);
   const [images, setImages] = useState([]);
   const [zoom, setZoom] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [serverUrl, setServerUrl] = useState('');
   const scrollContainerRef = useRef(null);
 
-  const handleFileUpload = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
+  // Load cover for a remote comic
+  const loadCover = async (comic) => {
+    if (comic.type !== 'remote' || comic.cover) return;
+    
+    try {
+      const response = await fetch(`${comic.serverUrl}/api/covers/${encodeURIComponent(comic.id.replace('remote-', ''))}`);
+      if (!response.ok) throw new Error('Failed to load cover');
+      
+      const blob = await response.blob();
+      const coverUrl = URL.createObjectURL(blob);
+      
+      setLibrary(prev => prev.map(item => 
+        item.id === comic.id ? { ...item, cover: coverUrl } : item
+      ));
+    } catch (error) {
+      console.error('Error loading cover:', error);
+    }
+  };
 
+  // Load covers when comics are added
+  useEffect(() => {
+    library.forEach(comic => {
+      if (comic.type === 'remote' && !comic.cover) {
+        loadCover(comic);
+      }
+    });
+  }, [library.length]);
+
+  const handleServerAdd = async () => {
+    if (!serverUrl) return;
+    setLoading(true);
+    
+    try {
+      const response = await fetch(`${serverUrl}/api/comics`);
+      if (!response.ok) throw new Error('Could not connect to server');
+      
+      const comics = await response.json();
+      console.log('Found comics on server:', comics);
+      
+      // Add each comic from the server to the library
+      const serverComics = comics.map(comic => ({
+        id: `remote-${comic.id}`, // Use the comic filename as part of the ID
+        name: comic.name,
+        type: 'remote',
+        serverUrl: serverUrl,
+        path: comic.path,
+        cover: null, // We'll load covers separately
+        progress: 0
+      }));
+      
+      setLibrary(prev => [...prev, ...serverComics]);
+      setServerUrl('');
+    } catch (error) {
+      console.error('Server connection error:', error);
+      setError('Could not connect to server: ' + error.message);
+    }
+    setLoading(false);
+  };
+
+  const handleFileUpload = async (event) => {
+    const files = Array.from(event.target.files);
+    
+    for (const file of files) {
+      if (!file) continue;
+
+      try {
+        if (file.name.endsWith('.cbz')) {
+          const zip = new JSZip();
+          const zipContent = await zip.loadAsync(file);
+          
+          // Get first image for cover
+          const allFiles = Object.entries(zipContent.files)
+            .filter(([name, entry]) => !entry.dir && name.match(/\.(jpg|jpeg|png|gif)$/i))
+            .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
+            
+          let coverUrl = null;
+          if (allFiles.length > 0) {
+            const coverBlob = await allFiles[0][1].async('blob');
+            coverUrl = URL.createObjectURL(coverBlob);
+          }
+
+          const newComic = {
+            id: `local-${Date.now()}-${file.name}`,
+            name: file.name.replace(/\.cbz$/i, ''),
+            file: file,
+            type: 'local',
+            cover: coverUrl,
+            progress: 0
+          };
+
+          setLibrary(prev => [...prev, newComic]);
+        }
+      } catch (error) {
+        console.error('Error processing file:', error);
+        setError(error.message);
+      }
+    }
+  };
+
+  const loadComic = async (comic) => {
     setLoading(true);
     setError(null);
     try {
-      if (file.name.endsWith('.cbz')) {
-        const zip = new JSZip();
-        const zipContent = await zip.loadAsync(file);
-        
-        const imageFiles = [];
-        for (const [filename, zipEntry] of Object.entries(zipContent.files)) {
-          if (!zipEntry.dir && filename.match(/\.(jpg|jpeg|png|gif)$/i)) {
-            imageFiles.push({
-              name: filename,
-              entry: zipEntry
-            });
+      if (comic.type === 'remote') {
+        const response = await fetch(`${comic.serverUrl}${comic.path}`, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/zip',
           }
-        }
+        });
+
+        if (!response.ok) throw new Error('Failed to fetch comic');
         
-        imageFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+        const blob = await response.blob();
+        const zip = new JSZip();
+        const zipContent = await zip.loadAsync(blob);
         
+        const imageFiles = Object.entries(zipContent.files)
+          .filter(([name, entry]) => !entry.dir && name.match(/\.(jpg|jpeg|png|gif)$/i))
+          .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
+
         const imageUrls = await Promise.all(
-          imageFiles.map(async ({ entry }) => {
+          imageFiles.map(async ([_, entry]) => {
             const blob = await entry.async('blob');
             return URL.createObjectURL(blob);
           })
         );
         
         setImages(imageUrls);
-      } else if (file.type.startsWith('image/')) {
-        const imageUrl = URL.createObjectURL(file);
-        setImages([imageUrl]);
-      } else {
-        throw new Error('Unsupported file type. Please upload a CBZ file or an image.');
+        setCurrentComic(comic);
+      } else if (comic.type === 'local') {
+        const zip = new JSZip();
+        const zipContent = await zip.loadAsync(comic.file);
+        
+        const imageFiles = Object.entries(zipContent.files)
+          .filter(([name, entry]) => !entry.dir && name.match(/\.(jpg|jpeg|png|gif)$/i))
+          .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
+
+        const imageUrls = await Promise.all(
+          imageFiles.map(async ([_, entry]) => {
+            const blob = await entry.async('blob');
+            return URL.createObjectURL(blob);
+          })
+        );
+        
+        setImages(imageUrls);
+        setCurrentComic(comic);
       }
     } catch (error) {
-      console.error('Error processing file:', error);
+      console.error('Error loading comic:', error);
       setError(error.message);
     }
     setLoading(false);
   };
 
+  // Cleanup URLs when unmounting
   useEffect(() => {
     return () => {
       images.forEach(URL.revokeObjectURL);
+      library.forEach(item => {
+        if (item.cover) {
+          URL.revokeObjectURL(item.cover);
+        }
+      });
     };
-  }, [images]);
-
-  const zoomIn = () => {
-    setZoom(prev => Math.min(prev + 0.2, 3));
-  };
-
-  const zoomOut = () => {
-    setZoom(prev => Math.max(prev - 0.2, 0.5));
-  };
-
-  // Handle keyboard events for zooming and scrolling
-  useEffect(() => {
-    const handleKeyPress = (e) => {
-      const scrollAmount = 200; // Adjust this value to change scroll speed
-      
-      switch(e.key) {
-        case '+':
-          zoomIn();
-          break;
-        case '-':
-          zoomOut();
-          break;
-        case 'ArrowDown':
-          if (scrollContainerRef.current) {
-            scrollContainerRef.current.scrollBy({
-              top: scrollAmount,
-              behavior: 'smooth'
-            });
-          }
-          break;
-        case 'ArrowUp':
-          if (scrollContainerRef.current) {
-            scrollContainerRef.current.scrollBy({
-              top: -scrollAmount,
-              behavior: 'smooth'
-            });
-          }
-          break;
-        case ' ': // Space bar
-          if (scrollContainerRef.current) {
-            scrollContainerRef.current.scrollBy({
-              top: window.innerHeight * 0.8,
-              behavior: 'smooth'
-            });
-          }
-          e.preventDefault(); // Prevent default space bar behavior
-          break;
-        default:
-          break;
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyPress);
-    return () => window.removeEventListener('keydown', handleKeyPress);
-  }, []);
+  }, [images, library]);
 
   return (
-    <div className="flex flex-col items-center w-full h-screen">
-      <Card className="w-full h-full bg-white shadow-lg max-w-5xl">
-        <CardContent className="p-4 h-full flex flex-col">
-          <div className="flex justify-between items-center mb-4 gap-4">
-            <input
-              type="file"
-              accept=".cbz,image/*"
-              onChange={handleFileUpload}
-              className="flex-1 text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 
-                       file:rounded-full file:border-0 file:text-sm file:font-semibold
-                       file:bg-slate-50 file:text-slate-700 hover:file:bg-slate-100
-                       focus:outline-none"
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={zoomOut}
-                className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
-                aria-label="Zoom out"
-              >
-                <ZoomOut className="w-6 h-6" />
-              </button>
-              <button
-                onClick={zoomIn}
-                className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
-                aria-label="Zoom in"
-              >
-                <ZoomIn className="w-6 h-6" />
-              </button>
+    <div className="flex h-screen bg-slate-50">
+      <Sheet>
+        <SheetTrigger asChild>
+          <Button variant="ghost" className="fixed top-4 left-4 z-50">
+            <Menu className="h-6 w-6" />
+          </Button>
+        </SheetTrigger>
+        <SheetContent side="left" className="w-80">
+          <SheetHeader>
+            <SheetTitle>Comic Library</SheetTitle>
+          </SheetHeader>
+          <div className="mt-4 space-y-4 h-[calc(100vh-6rem)] flex flex-col">
+            <div className="flex gap-2 flex-shrink-0">
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button variant="outline" className="w-full">
+                    <FolderPlus className="mr-2 h-4 w-4" />
+                    Add Files
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Add Comics</DialogTitle>
+                  </DialogHeader>
+                  <Input
+                    type="file"
+                    accept=".cbz"
+                    multiple
+                    onChange={handleFileUpload}
+                    className="mt-4"
+                  />
+                </DialogContent>
+              </Dialog>
+              
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button variant="outline" className="w-full">
+                    <Globe className="mr-2 h-4 w-4" />
+                    Add Server
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Add Server</DialogTitle>
+                  </DialogHeader>
+                  <div className="flex gap-2 mt-4">
+                    <Input
+                      type="url"
+                      placeholder="Server URL"
+                      value={serverUrl}
+                      onChange={(e) => setServerUrl(e.target.value)}
+                    />
+                    <Button onClick={handleServerAdd}>Add</Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
+            
+            <div className="space-y-2 overflow-y-auto flex-1">
+              {library.map((item) => (
+                <Card key={item.id} className="cursor-pointer hover:bg-slate-100" onClick={() => loadComic(item)}>
+                  <CardContent className="p-4 flex gap-4">
+                    {item.cover ? (
+                      <img 
+                        src={item.cover} 
+                        alt={`Cover of ${item.name}`}
+                        className="w-20 h-28 object-cover rounded-sm"
+                        onError={(e) => {
+                          console.error('Error loading cover for:', item.name);
+                          e.target.style.display = 'none';
+                          e.target.nextSibling.style.display = 'flex';
+                        }}
+                      />
+                    ) : (
+                      <div className="w-20 h-28 bg-slate-200 rounded-sm flex items-center justify-center p-1">
+                        <span className="text-xs text-slate-500">No cover found</span>
+                      </div>
+                    )}
+                    <div>
+                      <div className="font-medium">{item.name}</div>
+                      <div className="text-sm text-slate-500">{item.type}</div>
+                      {item.progress > 0 && (
+                        <div className="mt-2 h-1 bg-slate-200 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-blue-500 transition-all duration-300" 
+                            style={{ width: `${item.progress}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           </div>
+        </SheetContent>
+      </Sheet>
 
-          <div 
-            ref={scrollContainerRef}
-            className="flex-1 relative bg-slate-50 rounded-lg overflow-y-auto"
-            style={{
-              scrollBehavior: 'smooth',
-              scrollSnapType: 'y mandatory'
-            }}
-          >
-            {loading ? (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-900"></div>
-              </div>
-            ) : error ? (
-              <div className="absolute inset-0 flex items-center justify-center text-red-500 px-4 text-center">
-                {error}
-              </div>
-            ) : images.length > 0 ? (
-              <div className="flex flex-col items-center">
-                {images.map((imgSrc, index) => (
-                  <div
-                    key={index}
-                    className="w-full flex justify-center"
-                    style={{ scrollSnapAlign: 'start' }}
-                  >
-                    <img
-                      src={imgSrc}
-                      alt={`Comic page ${index + 1}`}
-                      className="max-w-full h-auto transition-transform duration-200"
-                      style={{ 
-                        transform: `scale(${zoom})`,
-                        maxHeight: '85vh'
-                      }}
-                    />
+      <div className="flex-1 p-4">
+        <Card className="w-full h-full bg-white shadow-lg max-w-5xl mx-auto">
+          <CardContent className="p-4 h-full flex flex-col">
+            {currentComic ? (
+              <>
+                <div className="flex justify-between items-center mb-4 gap-4">
+                  <h2 className="text-lg font-medium">{currentComic.name}</h2>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setZoom(prev => Math.max(prev - 0.2, 0.5))}
+                      className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
+                      aria-label="Zoom out"
+                    >
+                      <ZoomOut className="w-6 h-6" />
+                    </button>
+                    <button
+                      onClick={() => setZoom(prev => Math.min(prev + 0.2, 3))}
+                      className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
+                      aria-label="Zoom in"
+                    >
+                      <ZoomIn className="w-6 h-6" />
+                    </button>
                   </div>
-                ))}
-              </div>
+                </div>
+
+                <div 
+                  ref={scrollContainerRef}
+                  className="flex-1 relative bg-slate-50 rounded-lg overflow-y-auto"
+                  style={{
+                    scrollBehavior: 'smooth',
+                    scrollSnapType: 'y mandatory'
+                  }}
+                >
+                  {loading ? (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-900"></div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center">
+                      {images.map((imgSrc, index) => (
+                        <div
+                          key={index}
+                          className="w-full flex justify-center"
+                          style={{ scrollSnapAlign: 'start' }}
+                        >
+                          <img
+                            src={imgSrc}
+                            alt={`Page ${index + 1}`}
+                            className="max-w-full h-auto transition-transform duration-200"
+                            style={{ 
+                              transform: `scale(${zoom})`,
+                              maxHeight: '85vh'
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
             ) : (
-              <div className="absolute inset-0 flex items-center justify-center text-slate-500">
-                Upload a comic file to begin reading
+              <div className="flex-1 flex items-center justify-center text-slate-500">
+                Select a comic from your library to begin reading
               </div>
             )}
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 };
