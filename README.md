@@ -6,13 +6,11 @@
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
 
-A modern, feature-rich comic reader for CBZ files, built with React and Node.js.
+A modern, feature-rich comic reader in the browser for CBZ files, built with React and Node.js.
 
-[Features](#features) •
-[Screenshots](#screenshots) •
-[Installation](#installation) •
-[Usage](#usage) •
-[Contributing](#contributing)
+[Features](#-features) •
+[Screenshots](#-screenshots) •
+[Quick Start](#-quick-start)
 
 </div>
 
@@ -67,10 +65,6 @@ services:
     ports:
       - "3000:3000"
     restart: unless-stopped
-
-networks:
-  default:
-    driver: bridge
 ```
 
 Run with:
@@ -101,7 +95,7 @@ docker run -d \
   ghcr.io/jackolix/comic-server:latest
 ```
 
-## 🔌 API Reference
+## 🔌 API Reference Server
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -116,9 +110,9 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for detailed development setup and gui
 
 ## 📄 License
 
-This project is licensed under the MIT License
+This project is licensed under the MIT License - See [LICENSE](LICENSE)
 
-## 🙏 Code Used
+## 🙏 Code used
 
 - [JSZip](https://stuk.github.io/jszip/) - CBZ file handling
 - [shadcn/ui](https://ui.shadcn.com/) - UI components
