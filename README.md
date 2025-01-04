@@ -7,6 +7,7 @@
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
 
 A modern, feature-rich comic reader in the browser for CBZ files, built with React and Node.js.
+Test it here - https://comics.jackolix.dev
 
 [Features](#-features) •
 [Screenshots](#-screenshots) •
