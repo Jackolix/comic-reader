@@ -30,15 +30,20 @@ const ComicReader = () => {
   // Load saved servers from localStorage on mount
   useEffect(() => {
     const servers = JSON.parse(localStorage.getItem('comicReaderServers')) || [];
+    const savedPasswords = JSON.parse(localStorage.getItem('comicReaderPasswords')) || {};
     setSavedServers(servers);
-    // Auto-load comics from saved servers
-    servers.forEach(server => loadServerComics(server));
+    setServerPasswords(savedPasswords);
+    // Auto-load comics from saved servers with their passwords
+    servers.forEach(server => {
+      loadServerComics(server, savedPasswords[server]);
+    });
   }, []);
 
-  // Save servers to localStorage when they change
-  useEffect(() => {
+   // Save servers and passwords to localStorage when they change
+   useEffect(() => {
     localStorage.setItem('comicReaderServers', JSON.stringify(savedServers));
-  }, [savedServers]);
+    localStorage.setItem('comicReaderPasswords', JSON.stringify(serverPasswords));
+  }, [savedServers, serverPasswords]);
 
   // Load cover for a remote comic
   const loadCover = async (comic) => {
@@ -499,6 +504,11 @@ const ComicReader = () => {
                               size="sm"
                               onClick={() => {
                                 setSavedServers(prev => prev.filter(s => s !== server));
+                                setServerPasswords(prev => {
+                                  const newPasswords = { ...prev };
+                                  delete newPasswords[server];
+                                  return newPasswords;
+                                });
                                 setLibrary(prev => prev.filter(comic => 
                                   comic.type !== 'remote' || comic.serverUrl !== server
                                 ));
