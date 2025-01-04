@@ -25,6 +25,7 @@ const ComicReader = () => {
   const scrollContainerRef = useRef(null);
   const { theme, setTheme } = useTheme();
   const [savedServers, setSavedServers] = useState([]);
+  const [pendingServerUrl, setPendingServerUrl] = useState('');
 
   // Load saved servers from localStorage on mount
   useEffect(() => {
@@ -75,34 +76,78 @@ const ComicReader = () => {
   }, [library.length]);
 
   const loadServerComics = async (serverUrl) => {
+    console.log('loadServerComics called for URL:', serverUrl);
     setLoading(true);
     setError(null);
+    
     try {
       const normalizedUrl = serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
-      
-      // Make the authenticated request
-      const headers = {};
-      if (serverPasswords[normalizedUrl]) {
-        const base64Auth = btoa(`:${serverPasswords[normalizedUrl]}`);
-        headers.Authorization = `Basic ${base64Auth}`;
+      console.log('Has stored password?', !!serverPasswords[serverUrl]);
+  
+      // If we have a password, try to use it directly first
+      if (serverPasswords[serverUrl]) {
+        console.log('Attempting to use stored password');
+        const headers = {
+          Authorization: `Basic ${btoa(`:${serverPasswords[serverUrl]}`)}`,
+        };
+  
+        try {
+          const response = await fetch(`${normalizedUrl}/comics`, { headers });
+          console.log('Comics fetch response status:', response.status);
+          
+          if (response.status === 401) {
+            console.log('Authentication failed');
+            setAuthError('Invalid password');
+            return false;
+          }
+  
+          if (!response.ok) throw new Error('Could not connect to server');
+          
+          const comics = await response.json();
+          console.log('Successfully loaded comics:', comics.length);
+          
+          const serverComics = comics.map(comic => ({
+            id: `remote-${comic.id}`,
+            name: comic.name,
+            type: 'remote',
+            serverUrl: normalizedUrl,
+            path: comic.path,
+            cover: null,
+            progress: 0
+          }));
+          
+          setLibrary(prev => {
+            const filteredLibrary = prev.filter(comic => 
+              comic.type !== 'remote' || comic.serverUrl !== normalizedUrl
+            );
+            return [...filteredLibrary, ...serverComics];
+          });
+          
+          return true;
+        } catch (error) {
+          console.error('Error fetching with password:', error);
+          throw error;
+        }
       }
-
-      const response = await fetch(`${normalizedUrl}/comics`, { headers });
+  
+      // If we don't have a password or it failed, check if we need one
+      console.log('Checking if password is required');
+      const authCheckResponse = await fetch(`${normalizedUrl}/auth/check`);
+      const { requiresPassword } = await authCheckResponse.json();
       
-      if (response.status === 401) {
-        setAuthError('Invalid password');
-        // Remove invalid password
-        setServerPasswords(prev => {
-          const updated = { ...prev };
-          delete updated[normalizedUrl];
-          return updated;
-        });
-        return false;
+      if (requiresPassword) {
+        console.log('Password required but not provided');
+        setIsLibraryOpen(false);
+        return 'password-required';
       }
-
+  
+      // No password required, try to fetch comics without auth
+      console.log('No password required, fetching comics');
+      const response = await fetch(`${normalizedUrl}/comics`);
       if (!response.ok) throw new Error('Could not connect to server');
       
       const comics = await response.json();
+      console.log('Successfully loaded comics:', comics.length);
       
       const serverComics = comics.map(comic => ({
         id: `remote-${comic.id}`,
@@ -123,7 +168,7 @@ const ComicReader = () => {
       
       return true;
     } catch (error) {
-      console.error('Server connection error:', error);
+      console.error('Error in loadServerComics:', error);
       setError('Could not connect to server: ' + error.message);
       return false;
     } finally {
@@ -131,71 +176,109 @@ const ComicReader = () => {
     }
   };
 
-  // Load server passwords from localStorage on mount
-  useEffect(() => {
-    const savedPasswords = JSON.parse(localStorage.getItem('comicReaderPasswords')) || {};
-    setServerPasswords(savedPasswords);
-  }, []);
-
-  // Save server passwords to localStorage when they change
-  useEffect(() => {
-    localStorage.setItem('comicReaderPasswords', JSON.stringify(serverPasswords));
-  }, [serverPasswords]);
-
   const handleServerAdd = async () => {
     if (!serverUrl) return;
+    console.log('handleServerAdd called with URL:', serverUrl);
     
     try {
       const normalizedUrl = serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
+      console.log('Checking auth for URL:', normalizedUrl);
       
-      // Check if password is required
       const authCheckResponse = await fetch(`${normalizedUrl}/auth/check`);
       const { requiresPassword } = await authCheckResponse.json();
+      console.log('Password required?', requiresPassword);
       
-      if (requiresPassword && !serverPasswords[normalizedUrl]) {
+      if (requiresPassword && !serverPasswords[serverUrl]) {
+        console.log('Opening password dialog for URL:', serverUrl);
+        setPendingServerUrl(serverUrl);
+        setIsServerDialogOpen(false);
         setIsPasswordDialogOpen(true);
         return;
       }
       
-      // Already have password or no password required, try to load comics
-      const success = await loadServerComics(normalizedUrl);
-      if (success) {
-        if (!savedServers.includes(normalizedUrl)) {
-          setSavedServers(prev => [...prev, normalizedUrl]);
+      console.log('No password required, attempting to load comics');
+      const result = await loadServerComics(serverUrl);
+      console.log('Load comics result:', result);
+      
+      if (result === true) {
+        if (!savedServers.includes(serverUrl)) {
+          setSavedServers(prev => [...prev, serverUrl]);
         }
         setServerUrl('');
+        setIsPasswordDialogOpen(false);
         setIsServerDialogOpen(false);
       }
     } catch (error) {
-      console.error('Error checking server:', error);
+      console.error('Error in handleServerAdd:', error);
       setError('Could not connect to server: ' + error.message);
     }
   };
 
   const handlePasswordSubmit = async (password) => {
+    console.log('handlePasswordSubmit called with password length:', password.length);
+    console.log('Current pendingServerUrl:', pendingServerUrl);
+    
+    setAuthError('');
+    
     try {
-      setAuthError('');
-      const normalizedUrl = serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
+      const normalizedUrl = pendingServerUrl.endsWith('/') ? pendingServerUrl.slice(0, -1) : pendingServerUrl;
+      console.log('Making authenticated request with password');
       
-      // Save password
+      const headers = {
+        Authorization: `Basic ${btoa(`:${password}`)}`
+      };
+  
+      // Try to fetch comics with the provided password
+      const response = await fetch(`${normalizedUrl}/comics`, { headers });
+      console.log('Comics fetch response status:', response.status);
+      
+      if (response.status === 401) {
+        console.log('Authentication failed');
+        setAuthError('Invalid password');
+        return;
+      }
+  
+      if (!response.ok) throw new Error('Could not connect to server');
+      
+      const comics = await response.json();
+      console.log('Successfully loaded comics:', comics.length);
+      
+      // Only save password and update servers if fetch was successful
       setServerPasswords(prev => ({
         ...prev,
-        [normalizedUrl]: password
+        [pendingServerUrl]: password
       }));
-
-      // Try to load comics with the new password
-      const success = await loadServerComics(normalizedUrl);
-      if (success) {
-        if (!savedServers.includes(normalizedUrl)) {
-          setSavedServers(prev => [...prev, normalizedUrl]);
-        }
-        setIsPasswordDialogOpen(false);
-        setIsServerDialogOpen(false);
-        setServerUrl('');
+      
+      if (!savedServers.includes(pendingServerUrl)) {
+        setSavedServers(prev => [...prev, pendingServerUrl]);
       }
+  
+      const serverComics = comics.map(comic => ({
+        id: `remote-${comic.id}`,
+        name: comic.name,
+        type: 'remote',
+        serverUrl: normalizedUrl,
+        path: comic.path,
+        cover: null,
+        progress: 0
+      }));
+      
+      setLibrary(prev => {
+        const filteredLibrary = prev.filter(comic => 
+          comic.type !== 'remote' || comic.serverUrl !== normalizedUrl
+        );
+        return [...filteredLibrary, ...serverComics];
+      });
+  
+      // Clear dialog state
+      setIsPasswordDialogOpen(false);
+      setPendingServerUrl('');
+      setServerUrl('');
+      setIsServerDialogOpen(false);
+      
     } catch (error) {
-      console.error('Error connecting with password:', error);
-      setAuthError('Failed to connect with provided password');
+      console.error('Error in handlePasswordSubmit:', error);
+      setError('Could not connect to server: ' + error.message);
     }
   };
 
@@ -302,42 +385,69 @@ const ComicReader = () => {
   };
 
   // Password dialog component
-  const PasswordDialog = ({ serverUrl, onSubmit, onCancel, isOpen }) => {
+  const PasswordDialog = ({ onSubmit, onCancel, isOpen }) => {
     const [password, setPassword] = useState('');
     const { theme } = useTheme();
-
-    const handleSubmit = async (e) => {
-      e?.preventDefault();
-      await onSubmit(password);
-      setPassword(''); // Clear password after submission
+    
+    console.log('PasswordDialog render - isOpen:', isOpen);
+    
+    const handleSubmit = () => {
+      console.log('Dialog submit button clicked');
+      onSubmit(password);
+      setPassword('');
+    };
+    
+    const handleCancel = () => {
+      console.log('Dialog cancel triggered');
+      setPassword('');
+      onCancel();
     };
 
+    useEffect(() => {
+      console.log('PasswordDialog isOpen changed:', isOpen);
+    }, [isOpen]);
+
     return (
-      <Dialog open={isOpen} onOpenChange={onCancel}>
-        <DialogContent className={theme === 'dark' ? 'bg-[#1a2234] text-white border-[#3a4258]' : ''}>
+      <Dialog 
+        open={isOpen} 
+        onOpenChange={(open) => {
+          console.log('Dialog onOpenChange:', open);
+          if (!open) handleCancel();
+        }}
+      >
+        <DialogContent 
+          className={`${theme === 'dark' ? 'bg-[#1a2234] text-white border-[#3a4258]' : ''} z-[100]`}
+        >
           <DialogHeader>
             <DialogTitle>Server Password Required</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleSubmit}>
-            <div className="py-4">
-              <Input
-                type="password"
-                placeholder="Enter server password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className={theme === 'dark' ? 'bg-[#2a324a] border-[#3a4258] text-white' : ''}
-              />
-              {authError && (
-                <Alert variant="destructive" className="mt-2">
-                  <AlertDescription>{authError}</AlertDescription>
-                </Alert>
-              )}
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
-              <Button type="submit">Connect</Button>
-            </DialogFooter>
-          </form>
+          <div className="py-4">
+            <Input
+              type="password"
+              placeholder="Enter server password"
+              value={password}
+              onChange={(e) => {
+                console.log('Password input changed');
+                setPassword(e.target.value);
+              }}
+              className={theme === 'dark' ? 'bg-[#2a324a] border-[#3a4258] text-white' : ''}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  console.log('Enter key pressed in password input');
+                  handleSubmit();
+                }
+              }}
+            />
+            {authError && (
+              <Alert variant="destructive" className="mt-2">
+                <AlertDescription>{authError}</AlertDescription>
+              </Alert>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={handleCancel}>Cancel</Button>
+            <Button onClick={handleSubmit}>Connect</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     );
@@ -615,11 +725,12 @@ const ComicReader = () => {
       </div>
 
       <PasswordDialog
-        serverUrl={serverUrl}
         isOpen={isPasswordDialogOpen}
         onSubmit={handlePasswordSubmit}
         onCancel={() => {
+          console.log('Password dialog cancel callback');
           setIsPasswordDialogOpen(false);
+          setPendingServerUrl('');
           setAuthError('');
         }}
       />
