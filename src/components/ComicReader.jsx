@@ -144,19 +144,29 @@ const ComicReader = () => {
   const handleServerAdd = async () => {
     if (!serverUrl) return;
     
-    const result = await loadServerComics(serverUrl);
-    
-    if (result === 'password-required') {
-      setIsPasswordDialogOpen(true);
-      return;
-    }
-    
-    if (result === true) {
-      if (!savedServers.includes(serverUrl)) {
-        setSavedServers(prev => [...prev, serverUrl]);
+    // First check if password is required without trying to load comics
+    try {
+      const normalizedUrl = serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
+      const authCheckResponse = await fetch(`${normalizedUrl}/auth/check`);
+      const { requiresPassword } = await authCheckResponse.json();
+      
+      if (requiresPassword && !serverPasswords[serverUrl]) {
+        setIsPasswordDialogOpen(true);
+        return;
       }
-      setServerUrl('');
-      setIsServerDialogOpen(false);
+      
+      // Only attempt to load comics if no password is required or we already have it
+      const result = await loadServerComics(serverUrl);
+      if (result === true) {
+        if (!savedServers.includes(serverUrl)) {
+          setSavedServers(prev => [...prev, serverUrl]);
+        }
+        setServerUrl('');
+        setIsServerDialogOpen(false);
+      }
+    } catch (error) {
+      console.error('Error checking server:', error);
+      setError('Could not connect to server: ' + error.message);
     }
   };
 
