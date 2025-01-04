@@ -141,25 +141,36 @@ const ComicReader = () => {
     }
   };
 
+  // Load server passwords from localStorage on mount
+  useEffect(() => {
+    const savedPasswords = JSON.parse(localStorage.getItem('comicReaderPasswords')) || {};
+    setServerPasswords(savedPasswords);
+  }, []);
+
+  // Save server passwords to localStorage when they change
+  useEffect(() => {
+    localStorage.setItem('comicReaderPasswords', JSON.stringify(serverPasswords));
+  }, [serverPasswords]);
+
   const handleServerAdd = async () => {
     if (!serverUrl) return;
     
-    // First check if password is required without trying to load comics
     try {
       const normalizedUrl = serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
+      
+      // Check if password is required
       const authCheckResponse = await fetch(`${normalizedUrl}/auth/check`);
       const { requiresPassword } = await authCheckResponse.json();
       
-      if (requiresPassword && !serverPasswords[serverUrl]) {
+      if (requiresPassword && !serverPasswords[normalizedUrl]) {
         setIsPasswordDialogOpen(true);
         return;
       }
       
-      // Only attempt to load comics if no password is required or we already have it
-      const result = await loadServerComics(serverUrl);
+      const result = await loadServerComics(normalizedUrl);
       if (result === true) {
-        if (!savedServers.includes(serverUrl)) {
-          setSavedServers(prev => [...prev, serverUrl]);
+        if (!savedServers.includes(normalizedUrl)) {
+          setSavedServers(prev => [...prev, normalizedUrl]);
         }
         setServerUrl('');
         setIsServerDialogOpen(false);
@@ -171,21 +182,29 @@ const ComicReader = () => {
   };
 
   const handlePasswordSubmit = async (password) => {
-    setAuthError('');
-    setServerPasswords(prev => ({
-      ...prev,
-      [serverUrl]: password
-    }));
-    
-    const success = await loadServerComics(serverUrl);
-    
-    if (success === true) {
-      setIsPasswordDialogOpen(false);
-      if (!savedServers.includes(serverUrl)) {
-        setSavedServers(prev => [...prev, serverUrl]);
+    try {
+      setAuthError('');
+      const normalizedUrl = serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
+      
+      // Save password and attempt connection
+      setServerPasswords(prev => ({
+        ...prev,
+        [normalizedUrl]: password
+      }));
+
+      const success = await loadServerComics(normalizedUrl);
+      
+      if (success === true) {
+        if (!savedServers.includes(normalizedUrl)) {
+          setSavedServers(prev => [...prev, normalizedUrl]);
+        }
+        setServerUrl('');
+        setIsPasswordDialogOpen(false);
+        setIsServerDialogOpen(false);
       }
-      setServerUrl('');
-      setIsServerDialogOpen(false);
+    } catch (error) {
+      console.error('Error submitting password:', error);
+      setAuthError('Failed to connect with provided password');
     }
   };
 
@@ -296,30 +315,38 @@ const ComicReader = () => {
     const [password, setPassword] = useState('');
     const { theme } = useTheme();
 
+    const handleSubmit = async (e) => {
+      e?.preventDefault();
+      await onSubmit(password);
+      setPassword(''); // Clear password after submission
+    };
+
     return (
       <Dialog open={isOpen} onOpenChange={onCancel}>
         <DialogContent className={theme === 'dark' ? 'bg-[#1a2234] text-white border-[#3a4258]' : ''}>
           <DialogHeader>
             <DialogTitle>Server Password Required</DialogTitle>
           </DialogHeader>
-          <div className="py-4">
-            <Input
-              type="password"
-              placeholder="Enter server password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className={theme === 'dark' ? 'bg-[#2a324a] border-[#3a4258] text-white' : ''}
-            />
-            {authError && (
-              <Alert variant="destructive" className="mt-2">
-                <AlertDescription>{authError}</AlertDescription>
-              </Alert>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={onCancel}>Cancel</Button>
-            <Button onClick={() => onSubmit(password)}>Connect</Button>
-          </DialogFooter>
+          <form onSubmit={handleSubmit}>
+            <div className="py-4">
+              <Input
+                type="password"
+                placeholder="Enter server password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className={theme === 'dark' ? 'bg-[#2a324a] border-[#3a4258] text-white' : ''}
+              />
+              {authError && (
+                <Alert variant="destructive" className="mt-2">
+                  <AlertDescription>{authError}</AlertDescription>
+                </Alert>
+              )}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
+              <Button type="submit">Connect</Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     );
