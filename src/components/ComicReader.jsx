@@ -80,20 +80,10 @@ const ComicReader = () => {
     try {
       const normalizedUrl = serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
       
-      // First check if password is required
-      const authCheckResponse = await fetch(`${normalizedUrl}/auth/check`);
-      const { requiresPassword } = await authCheckResponse.json();
-      
-      // If password is required but not provided, prompt for it
-      if (requiresPassword && !serverPasswords[serverUrl]) {
-        setIsLibraryOpen(false);
-        return 'password-required';
-      }
-
       // Make the authenticated request
       const headers = {};
-      if (serverPasswords[serverUrl]) {
-        const base64Auth = btoa(`:${serverPasswords[serverUrl]}`);
+      if (serverPasswords[normalizedUrl]) {
+        const base64Auth = btoa(`:${serverPasswords[normalizedUrl]}`);
         headers.Authorization = `Basic ${base64Auth}`;
       }
 
@@ -104,7 +94,7 @@ const ComicReader = () => {
         // Remove invalid password
         setServerPasswords(prev => {
           const updated = { ...prev };
-          delete updated[serverUrl];
+          delete updated[normalizedUrl];
           return updated;
         });
         return false;
@@ -167,8 +157,9 @@ const ComicReader = () => {
         return;
       }
       
-      const result = await loadServerComics(normalizedUrl);
-      if (result === true) {
+      // Already have password or no password required, try to load comics
+      const success = await loadServerComics(normalizedUrl);
+      if (success) {
         if (!savedServers.includes(normalizedUrl)) {
           setSavedServers(prev => [...prev, normalizedUrl]);
         }
@@ -186,24 +177,24 @@ const ComicReader = () => {
       setAuthError('');
       const normalizedUrl = serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
       
-      // Save password and attempt connection
+      // Save password
       setServerPasswords(prev => ({
         ...prev,
         [normalizedUrl]: password
       }));
 
+      // Try to load comics with the new password
       const success = await loadServerComics(normalizedUrl);
-      
-      if (success === true) {
+      if (success) {
         if (!savedServers.includes(normalizedUrl)) {
           setSavedServers(prev => [...prev, normalizedUrl]);
         }
-        setServerUrl('');
         setIsPasswordDialogOpen(false);
         setIsServerDialogOpen(false);
+        setServerUrl('');
       }
     } catch (error) {
-      console.error('Error submitting password:', error);
+      console.error('Error connecting with password:', error);
       setAuthError('Failed to connect with provided password');
     }
   };
