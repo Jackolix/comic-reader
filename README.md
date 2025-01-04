@@ -1,142 +1,125 @@
-# Comic Reader
+# Comic Reader 📚
 
-A web-based comic reader application built with React and Node.js that supports both local and server-hosted CBZ files.
+<div align="center">
 
-## Features
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
 
-- Read CBZ comic files
-- Smooth scrolling between pages
-- Zoom controls
-- Library management
-- Support for both local files and remote server
-- Cover image previews
-- Progress tracking
-- Docker support for easy deployment
+A modern, feature-rich comic reader for CBZ files, built with React and Node.js.
 
-## Structure
+[Features](#features) •
+[Screenshots](#screenshots) •
+[Installation](#installation) •
+[Usage](#usage) •
+[Contributing](#contributing)
 
-```
-comic-reader/
-├── client/          # React frontend
-├── server/          # Express backend
-└── docker-compose.yml
-```
+</div>
 
-## Prerequisites
+## ✨ Features
 
-- Node.js 18 or higher
-- Docker and Docker Compose (for containerized setup)
-- A modern web browser
+- 📖 Smooth comic reading experience with CBZ support
+- 🌙 Dark and light mode support
+- 🔒 Optional password protection for servers
+- 🖱️ Intuitive page navigation with scroll and arrow keys
+- 🔍 Advanced zoom controls for detailed panel viewing
+- 📚 Comprehensive library management system
+- 🌐 Support for both local files and remote server
+- 🎨 Beautiful cover image previews
+- 🐳 Docker support for easy deployment
 
-## Quick Start
+## 📸 Screenshots
 
-### Development
+### Library View (Dark Mode)
+![Library View Dark Mode](docs/images/library-dark.png)
+*Comic library interface with add files and server options*
 
-1. Clone the repository:
-```bash
-git clone https://github.com/jackolix/comic-reader.git
-cd comic-reader
-```
+### Library View (Light Mode)
+![Library View Light Mode](docs/images/library-light.png)
+*Same interface in light mode*
 
-2. Install dependencies:
-```bash
-# Install root dependencies
-npm install
+### Comic Reader
+![Comic Reader Interface](docs/images/reader.png)
+*Comic reading interface with zoom controls*
 
-# Install client dependencies
-npm install
+## 🚀 Quick Start
 
-# Install server dependencies
-cd server
-npm install
-```
+### Using Docker Compose
 
-3. Start the development servers:
-```bash
-# Start both frontend and backend
-npm run dev
+Create a `docker-compose.yml` file:
 
-# Or start separately:
-npm run client  # Frontend only
-npm run server  # Backend only
-```
-
-### Docker Setup
-
-1. Configure your comics directory in `docker-compose.yml`:
 ```yaml
 services:
-  server:
+  comic-reader:
+    image: ghcr.io/jackolix/comic-reader:latest
+    ports:
+      - "80:80"
+    restart: unless-stopped
+
+  comic-server:
+    image: ghcr.io/jackolix/comic-server:latest
     volumes:
-      - /path/to/your/comics:/comics  # Change this path
+      - ./comics:/comics
+    environment:
+      - COMICS_DIR=/comics
+      - SERVER_PASSWORD=your_secure_password #optional
+      - PORT=3000 #default is 3000
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+networks:
+  default:
+    driver: bridge
 ```
 
-2. Build and start the containers:
+Run with:
 ```bash
 docker-compose up -d
 ```
 
-3. Access the application:
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:3000
+### Using Docker Run
 
-## Configuration
+For the comic reader (frontend):
+```bash
+docker run -d \
+  --name comic-reader \
+  -p 80:80 \
+  --restart unless-stopped \
+  ghcr.io/jackolix/comic-reader:latest
+```
 
-### Server Configuration
-- Comics directory can be configured via environment variable:
-  ```
-  COMICS_DIR=/path/to/comics
-  ```
+For the comic server (backend):
+```bash
+docker run -d \
+  --name comic-server \
+  -v /path/to/your/comics:/comics \
+  -e COMICS_DIR=/comics \
+  -e SERVER_PASSWORD=your_secure_password \ #optional
+  -p 3000:3000 \
+  --restart unless-stopped \
+  ghcr.io/jackolix/comic-server:latest
+```
 
-### Client Configuration
-- API URL can be configured in the environment:
-  ```
-  VITE_API_URL=http://localhost:3000
-  ```
+## 🔌 API Reference
 
-## Usage
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/comics` | GET | List all comics |
+| `/api/comics/:filename` | GET | Retrieve specific comic |
+| `/api/covers/:filename` | GET | Get comic cover |
+| `/api/status` | GET | Server health check |
 
-1. Open the application in your browser
-2. Add comics either by:
-   - Uploading local CBZ files
-   - Connecting to a comic server
-3. Click on a comic in the library to start reading
-4. Use scroll or arrow keys to navigate
-5. Use zoom controls to adjust view
+## 🤝 Contributing
 
-## API Endpoints
+See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for detailed development setup and guidelines.
 
-- `GET /api/comics` - List all available comics
-- `GET /api/comics/:filename` - Get a specific comic
-- `GET /api/covers/:filename` - Get a comic's cover image
-- `GET /api/status` - Check server status
+## 📄 License
 
-## Development
+This project is licensed under the MIT License
 
-### Frontend
-- Built with React + Vite
-- Uses shadcn/ui for components
-- State management with React hooks
+## 🙏 Code Used
 
-### Backend
-- Express.js server
-- File streaming for comic delivery
-- CORS enabled for development
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- Uses [JSZip](https://stuk.github.io/jszip/) for CBZ file handling
-- UI components from [shadcn/ui](https://ui.shadcn.com/)
-- Icons from [Lucide](https://lucide.dev/)
+- [JSZip](https://stuk.github.io/jszip/) - CBZ file handling
+- [shadcn/ui](https://ui.shadcn.com/) - UI components
+- [Lucide](https://lucide.dev/) - Icons

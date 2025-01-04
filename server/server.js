@@ -14,7 +14,7 @@ app.use(cors({
   exposedHeaders: ['Content-Length', 'Content-Type', 'Content-Disposition']
 }));
 
-const COMICS_DIR = process.env.COMICS_DIR || './comics';
+const COMICS_DIR = process.env.COMICS_DIR || '/comics';
 const SERVER_PASSWORD = process.env.SERVER_PASSWORD || ''; // Optional password
 
 // Middleware to check password if one is set
