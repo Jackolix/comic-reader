@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ZoomIn, ZoomOut, Menu, FolderPlus, Globe } from 'lucide-react';
+import { ZoomIn, ZoomOut, Menu, FolderPlus, Globe, Lock } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useTheme } from 'next-themes';
 import JSZip from 'jszip';
 
@@ -18,6 +19,9 @@ const ComicReader = () => {
   const [serverUrl, setServerUrl] = useState('');
   const [isServerDialogOpen, setIsServerDialogOpen] = useState(false);
   const [isLibraryOpen, setIsLibraryOpen] = useState(true);
+  const [serverPasswords, setServerPasswords] = useState({});
+  const [authError, setAuthError] = useState('');
+  const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
   const scrollContainerRef = useRef(null);
   const { theme, setTheme } = useTheme();
   const [savedServers, setSavedServers] = useState([]);
@@ -40,8 +44,14 @@ const ComicReader = () => {
     if (comic.type !== 'remote' || comic.cover) return;
     
     try {
+      const headers = {};
+      if (serverPasswords[comic.serverUrl]) {
+        const base64Auth = btoa(`:${serverPasswords[comic.serverUrl]}`);
+        headers.Authorization = `Basic ${base64Auth}`;
+      }
+
       const comicId = comic.id.replace('remote-', '');
-      const response = await fetch(`${comic.serverUrl}/covers/${encodeURIComponent(comicId)}`);
+      const response = await fetch(`${comic.serverUrl}/covers/${encodeURIComponent(comicId)}`, { headers });
       if (!response.ok) throw new Error('Failed to load cover');
       
       const blob = await response.blob();
@@ -68,9 +78,38 @@ const ComicReader = () => {
     setLoading(true);
     setError(null);
     try {
-      // Remove trailing slash if present
       const normalizedUrl = serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
-      const response = await fetch(`${normalizedUrl}/comics`);
+      
+      // First check if password is required
+      const authCheckResponse = await fetch(`${normalizedUrl}/auth/check`);
+      const { requiresPassword } = await authCheckResponse.json();
+      
+      // If password is required but not provided, prompt for it
+      if (requiresPassword && !serverPasswords[serverUrl]) {
+        setIsLibraryOpen(false);
+        return 'password-required';
+      }
+
+      // Make the authenticated request
+      const headers = {};
+      if (serverPasswords[serverUrl]) {
+        const base64Auth = btoa(`:${serverPasswords[serverUrl]}`);
+        headers.Authorization = `Basic ${base64Auth}`;
+      }
+
+      const response = await fetch(`${normalizedUrl}/comics`, { headers });
+      
+      if (response.status === 401) {
+        setAuthError('Invalid password');
+        // Remove invalid password
+        setServerPasswords(prev => {
+          const updated = { ...prev };
+          delete updated[serverUrl];
+          return updated;
+        });
+        return false;
+      }
+
       if (!response.ok) throw new Error('Could not connect to server');
       
       const comics = await response.json();
@@ -80,23 +119,23 @@ const ComicReader = () => {
         name: comic.name,
         type: 'remote',
         serverUrl: normalizedUrl,
-        path: comic.path, // Use the exact path from the server
+        path: comic.path,
         cover: null,
         progress: 0
       }));
       
       setLibrary(prev => {
-        // Remove existing comics from this server
         const filteredLibrary = prev.filter(comic => 
           comic.type !== 'remote' || comic.serverUrl !== normalizedUrl
         );
         return [...filteredLibrary, ...serverComics];
       });
-      return true; // Return success
+      
+      return true;
     } catch (error) {
       console.error('Server connection error:', error);
       setError('Could not connect to server: ' + error.message);
-      return false; // Return failure
+      return false;
     } finally {
       setLoading(false);
     }
@@ -105,10 +144,33 @@ const ComicReader = () => {
   const handleServerAdd = async () => {
     if (!serverUrl) return;
     
+    const result = await loadServerComics(serverUrl);
+    
+    if (result === 'password-required') {
+      setIsPasswordDialogOpen(true);
+      return;
+    }
+    
+    if (result === true) {
+      if (!savedServers.includes(serverUrl)) {
+        setSavedServers(prev => [...prev, serverUrl]);
+      }
+      setServerUrl('');
+      setIsServerDialogOpen(false);
+    }
+  };
+
+  const handlePasswordSubmit = async (password) => {
+    setAuthError('');
+    setServerPasswords(prev => ({
+      ...prev,
+      [serverUrl]: password
+    }));
+    
     const success = await loadServerComics(serverUrl);
     
-    if (success) {
-      // Only save the server and close dialog if connection was successful
+    if (success === true) {
+      setIsPasswordDialogOpen(false);
       if (!savedServers.includes(serverUrl)) {
         setSavedServers(prev => [...prev, serverUrl]);
       }
@@ -162,16 +224,18 @@ const ComicReader = () => {
     setError(null);
     try {
       if (comic.type === 'remote') {
-        // Correctly encode the comic path, preserving the original structure
-        const filename = comic.path.split('/').pop();
-        const encodedPath = `/comics/${encodeURIComponent(decodeURIComponent(filename))}`;
+        const headers = {};
+        if (serverPasswords[comic.serverUrl]) {
+          const base64Auth = btoa(`:${serverPasswords[comic.serverUrl]}`);
+          headers.Authorization = `Basic ${base64Auth}`;
+          headers.Accept = 'application/zip';
+        }
+
+        const response = await fetch(`${comic.serverUrl}${comic.path}`, { headers });
         
-        const response = await fetch(`${comic.serverUrl}${encodedPath}`, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/zip',
-          }
-        });
+        if (response.status === 401) {
+          throw new Error('Authentication required');
+        }
 
         if (!response.ok) throw new Error('Failed to fetch comic');
         
@@ -215,6 +279,40 @@ const ComicReader = () => {
       setError(error.message);
     }
     setLoading(false);
+  };
+
+  // Password dialog component
+  const PasswordDialog = ({ serverUrl, onSubmit, onCancel, isOpen }) => {
+    const [password, setPassword] = useState('');
+    const { theme } = useTheme();
+
+    return (
+      <Dialog open={isOpen} onOpenChange={onCancel}>
+        <DialogContent className={theme === 'dark' ? 'bg-[#1a2234] text-white border-[#3a4258]' : ''}>
+          <DialogHeader>
+            <DialogTitle>Server Password Required</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <Input
+              type="password"
+              placeholder="Enter server password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className={theme === 'dark' ? 'bg-[#2a324a] border-[#3a4258] text-white' : ''}
+            />
+            {authError && (
+              <Alert variant="destructive" className="mt-2">
+                <AlertDescription>{authError}</AlertDescription>
+              </Alert>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={onCancel}>Cancel</Button>
+            <Button onClick={() => onSubmit(password)}>Connect</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
   };
 
   // Cleanup URLs when unmounting
@@ -296,6 +394,7 @@ const ComicReader = () => {
                         placeholder="Server URL"
                         value={serverUrl}
                         onChange={(e) => setServerUrl(e.target.value)}
+                        className={theme === 'dark' ? 'bg-[#2a324a] border-[#3a4258] text-white' : ''}
                       />
                       <Button 
                         onClick={handleServerAdd}
@@ -367,7 +466,12 @@ const ComicReader = () => {
                       }`}>{item.name}</div>
                       <div className={`text-sm ${
                         theme === 'dark' ? 'text-slate-300' : 'text-slate-500'
-                      }`}>{item.type}</div>
+                      }`}>
+                        {item.type}
+                        {item.type === 'remote' && serverPasswords[item.serverUrl] && (
+                          <Lock className="inline-block ml-1 h-3 w-3" />
+                        )}
+                      </div>
                       {item.progress > 0 && (
                         <div className={`mt-2 h-1 rounded-full overflow-hidden ${
                           theme === 'dark' ? 'bg-[#1a2234]' : 'bg-slate-200'
@@ -481,6 +585,16 @@ const ComicReader = () => {
           </CardContent>
         </Card>
       </div>
+
+      <PasswordDialog
+        serverUrl={serverUrl}
+        isOpen={isPasswordDialogOpen}
+        onSubmit={handlePasswordSubmit}
+        onCancel={() => {
+          setIsPasswordDialogOpen(false);
+          setAuthError('');
+        }}
+      />
     </div>
   );
 };

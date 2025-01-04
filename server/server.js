@@ -6,12 +6,47 @@ const JSZip = require('jszip');
 
 const app = express();
 
+// Enable JSON body parsing
+app.use(express.json());
+
 // Configure CORS
 app.use(cors({
   exposedHeaders: ['Content-Length', 'Content-Type', 'Content-Disposition']
 }));
 
 const COMICS_DIR = process.env.COMICS_DIR || '/comics';
+const SERVER_PASSWORD = process.env.SERVER_PASSWORD || ''; // Optional password
+
+// Middleware to check password if one is set
+const checkPassword = (req, res, next) => {
+  if (!SERVER_PASSWORD) {
+    return next(); // No password set, skip authentication
+  }
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  // Extract password from Basic auth header
+  const base64Credentials = authHeader.split(' ')[1];
+  const credentials = Buffer.from(base64Credentials, 'base64').toString('utf8');
+  const password = credentials.split(':')[1];
+
+  if (password !== SERVER_PASSWORD) {
+    return res.status(401).json({ error: 'Invalid password' });
+  }
+
+  next();
+};
+
+// New endpoint to check if password is required
+app.get('/auth/check', (req, res) => {
+  res.json({ requiresPassword: !!SERVER_PASSWORD });
+});
+
+// Apply password check to all comic-related routes
+app.use(['/comics', '/covers'], checkPassword);
 
 // List all comics
 app.get('/comics', async (req, res) => {
