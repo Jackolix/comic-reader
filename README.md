@@ -118,4 +118,4 @@ This project is licensed under the MIT License - See [LICENSE](LICENSE)
 - [JSZip](https://stuk.github.io/jszip/) - CBZ file handling
 - [shadcn/ui](https://ui.shadcn.com/) - UI components
 - [Lucide](https://lucide.dev/) - Icons
-- [Tab Icon](https://www.flaticon.com/free-icon/comic_626610?term=comic&page=1&position=43&origin=tag&related_id=626610) - flaticon icons
+- [Tab Icon](https://www.flaticon.com/free-icon/comic_626610?term=comic&page=1&position=43&origin=tag&related_id=626610) - flaticon icons 
