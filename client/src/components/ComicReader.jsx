@@ -29,14 +29,24 @@ const ComicReader = () => {
 
   // Load saved servers from localStorage on mount
   useEffect(() => {
-    const servers = JSON.parse(localStorage.getItem('comicReaderServers')) || [];
-    const savedPasswords = JSON.parse(localStorage.getItem('comicReaderPasswords')) || {};
-    setSavedServers(servers);
-    setServerPasswords(savedPasswords);
-    // Auto-load comics from saved servers with their passwords
-    servers.forEach(server => {
-      loadServerComics(server, savedPasswords[server]);
-    });
+    const initializeLibrary = async () => {
+      try {
+        const servers = JSON.parse(localStorage.getItem('comicReaderServers')) || [];
+        const savedPasswords = JSON.parse(localStorage.getItem('comicReaderPasswords')) || {};
+        setSavedServers(servers);
+        setServerPasswords(savedPasswords);
+        
+        // Load comics sequentially to avoid race conditions
+        for (const server of servers) {
+          await loadServerComics(server, savedPasswords[server]);
+        }
+      } catch (error) {
+        console.error('Error initializing library:', error);
+        setError('Failed to initialize library');
+      }
+    };
+    
+    initializeLibrary();
   }, []);
 
    // Save servers and passwords to localStorage when they change
@@ -46,16 +56,18 @@ const ComicReader = () => {
   }, [savedServers, serverPasswords]);
 
   // Load cover for a remote comic
-  const loadCover = async (comic) => {
+  const loadCover = async (comic, password) => {
     if (comic.type !== 'remote' || comic.cover) return;
     
     try {
       const headers = {};
-      if (serverPasswords[comic.serverUrl]) {
-        const base64Auth = btoa(`:${serverPasswords[comic.serverUrl]}`);
+      // Use the passed password or fall back to the state
+      const authPassword = password || serverPasswords[comic.serverUrl];
+      if (authPassword) {
+        const base64Auth = btoa(`:${authPassword}`);
         headers.Authorization = `Basic ${base64Auth}`;
       }
-
+  
       const comicId = comic.id.replace('remote-', '');
       const response = await fetch(`${comic.serverUrl}/covers/${encodeURIComponent(comicId)}`, { headers });
       if (!response.ok) throw new Error('Failed to load cover');
@@ -73,23 +85,27 @@ const ComicReader = () => {
 
   // Load covers when comics are added
   useEffect(() => {
-    library.forEach(comic => {
-      if (comic.type === 'remote' && !comic.cover) {
-        loadCover(comic);
+    const loadCovers = async () => {
+      const savedPasswords = JSON.parse(localStorage.getItem('comicReaderPasswords')) || {};
+      for (const comic of library) {
+        if (comic.type === 'remote' && !comic.cover) {
+          await loadCover(comic, savedPasswords[comic.serverUrl]);
+        }
       }
-    });
+    };
+    loadCovers();
   }, [library.length]);
 
-  const loadServerComics = async (serverUrl) => {
+  const loadServerComics = async (serverUrl, password) => {
     setLoading(true);
     setError(null);
     
     try {
       const normalizedUrl = serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
 
-      if (serverPasswords[serverUrl]) {
+      if (password) {
         const headers = {
-          Authorization: `Basic ${btoa(`:${serverPasswords[serverUrl]}`)}`,
+          Authorization: `Basic ${btoa(`:${password}`)}`,
         };
   
         try {
@@ -295,18 +311,25 @@ const ComicReader = () => {
     try {
       if (comic.type === 'remote') {
         const headers = {};
-        if (serverPasswords[comic.serverUrl]) {
-          const base64Auth = btoa(`:${serverPasswords[comic.serverUrl]}`);
+        // Get the password from localStorage directly to ensure we have the latest value
+        const savedPasswords = JSON.parse(localStorage.getItem('comicReaderPasswords')) || {};
+        const password = savedPasswords[comic.serverUrl] || serverPasswords[comic.serverUrl];
+        
+        if (password) {
+          const base64Auth = btoa(`:${password}`);
           headers.Authorization = `Basic ${base64Auth}`;
           headers.Accept = 'application/zip';
         }
-
+  
         const response = await fetch(`${comic.serverUrl}${comic.path}`, { headers });
         
         if (response.status === 401) {
+          // If authentication fails, we might need to prompt for password again
+          setPendingServerUrl(comic.serverUrl);
+          setIsPasswordDialogOpen(true);
           throw new Error('Authentication required');
         }
-
+  
         if (!response.ok) throw new Error('Failed to fetch comic');
         
         const blob = await response.blob();
