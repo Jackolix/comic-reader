@@ -1,0 +1,13 @@
+[package]
+name = "comic-reader-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rocket = { version = "0.5.1", features = ["json"] }
+serde = { version = "1.0.217", features = ["derive"] }
+zip = "2.2.2"
+base64 = "0.22.1"
+tokio = "1.42.0"
+urlencoding = "2.1.3"
+notify = "7.0.0"
