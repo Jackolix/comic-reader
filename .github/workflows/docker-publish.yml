@@ -77,7 +77,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./server/rust
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: ${{ env.REGISTRY }}/${{ steps.string.outputs.rust_server_image }}:latest
           cache-from: type=gha
