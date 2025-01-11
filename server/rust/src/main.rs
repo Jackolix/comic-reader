@@ -9,6 +9,7 @@ mod utils;
 use std::path::PathBuf;
 use crate::config::AppConfig;
 use crate::services::comic_service::ComicService;
+use crate::utils::cors::CORS;
 
 #[launch]
 async fn rocket() -> rocket::Rocket<rocket::Build> {
@@ -27,6 +28,7 @@ async fn rocket() -> rocket::Rocket<rocket::Build> {
         .expect("Failed to initialize comic service");
 
     rocket::build()
+        .attach(CORS)
         .manage(config)
         .manage(comic_service)
         .mount("/", routes![
