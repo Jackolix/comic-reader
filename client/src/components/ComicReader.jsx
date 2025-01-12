@@ -120,11 +120,10 @@ const ComicReader = () => {
           
           const comics = await response.json();
           const serverComics = comics.map(comic => ({
-            id: `remote-${comic.id}`,
+            id: comic.id,
             name: comic.name,
             type: 'remote',
             serverUrl: normalizedUrl,
-            path: comic.path,
             cover: null,
             progress: 0
           }));
@@ -311,42 +310,46 @@ const ComicReader = () => {
     try {
       if (comic.type === 'remote') {
         const headers = {};
-        // Get the password from localStorage directly to ensure we have the latest value
         const savedPasswords = JSON.parse(localStorage.getItem('comicReaderPasswords')) || {};
         const password = savedPasswords[comic.serverUrl] || serverPasswords[comic.serverUrl];
-        
+
         if (password) {
           const base64Auth = btoa(`:${password}`);
           headers.Authorization = `Basic ${base64Auth}`;
           headers.Accept = 'application/zip';
         }
-  
-        const response = await fetch(`${comic.serverUrl}${comic.path}`, { headers });
-        
+
+        // Use the correct URL construction
+        const comicId = comic.id.replace('remote-', '');
+        const url = `${comic.serverUrl}/comics/${encodeURIComponent(comicId)}`;
+        console.log('Fetching comic from:', url); // Debug log
+
+        const response = await fetch(url, { headers });
+
         if (response.status === 401) {
-          // If authentication fails, we might need to prompt for password again
           setPendingServerUrl(comic.serverUrl);
           setIsPasswordDialogOpen(true);
           throw new Error('Authentication required');
         }
-  
+
         if (!response.ok) throw new Error('Failed to fetch comic');
-        
+
+        // Rest of your code remains the same
         const blob = await response.blob();
         const zip = new JSZip();
         const zipContent = await zip.loadAsync(blob);
-        
+
         const imageFiles = Object.entries(zipContent.files)
-          .filter(([name, entry]) => !entry.dir && name.match(/\.(jpg|jpeg|png|gif)$/i))
-          .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
+            .filter(([name, entry]) => !entry.dir && name.match(/\.(jpg|jpeg|png|gif)$/i))
+            .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
 
         const imageUrls = await Promise.all(
-          imageFiles.map(async ([_, entry]) => {
-            const blob = await entry.async('blob');
-            return URL.createObjectURL(blob);
-          })
+            imageFiles.map(async ([_, entry]) => {
+              const blob = await entry.async('blob');
+              return URL.createObjectURL(blob);
+            })
         );
-        
+
         setImages(imageUrls);
         setCurrentComic(comic);
       } else if (comic.type === 'local') {
