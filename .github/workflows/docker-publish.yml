@@ -73,7 +73,7 @@ jobs:
       - name: Build and push Rust server Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./server/rust
+          context: ./server
           platforms: linux/amd64
           push: true
           tags: ${{ env.REGISTRY }}/${{ steps.string.outputs.rust_server_image }}:${{ steps.docker_tag.outputs.tag }}
