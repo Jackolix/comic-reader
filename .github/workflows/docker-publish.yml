@@ -2,13 +2,12 @@ name: Build and Push Docker Images
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, dev ]
   workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
   FRONTEND_IMAGE_NAME: ${{ github.repository_owner }}/comic-reader
-  SERVER_IMAGE_NAME: ${{ github.repository_owner }}/comic-server
   RUST_SERVER_IMAGE_NAME: ${{ github.repository_owner }}/comic-rust-server
 
 jobs:
@@ -40,8 +39,17 @@ jobs:
         id: string
         run: |
           echo "frontend_image=${FRONTEND_IMAGE_NAME,,}" >> $GITHUB_OUTPUT
-          echo "server_image=${SERVER_IMAGE_NAME,,}" >> $GITHUB_OUTPUT
           echo "rust_server_image=${RUST_SERVER_IMAGE_NAME,,}" >> $GITHUB_OUTPUT
+
+      # Set the Docker tag based on the branch
+      - name: Set Docker tag
+        id: docker_tag
+        run: |
+          if [[ ${{ github.ref }} == 'refs/heads/main' ]]; then
+            echo "tag=latest" >> $GITHUB_OUTPUT
+          else
+            echo "tag=dev" >> $GITHUB_OUTPUT
+          fi
 
       # Build and push frontend
       - name: Build and push frontend Docker image
@@ -50,18 +58,7 @@ jobs:
           context: ./client
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ env.REGISTRY }}/${{ steps.string.outputs.frontend_image }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # Build and push server
-      - name: Build and push server Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./server
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ steps.string.outputs.server_image }}:latest
+          tags: ${{ env.REGISTRY }}/${{ steps.string.outputs.frontend_image }}:${{ steps.docker_tag.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -79,6 +76,6 @@ jobs:
           context: ./server/rust
           platforms: linux/amd64
           push: true
-          tags: ${{ env.REGISTRY }}/${{ steps.string.outputs.rust_server_image }}:latest
+          tags: ${{ env.REGISTRY }}/${{ steps.string.outputs.rust_server_image }}:${{ steps.docker_tag.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

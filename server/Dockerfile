@@ -1,20 +1,27 @@
-FROM node:18-alpine
+# Use the official Rust image as the base image
+FROM rust:latest as builder
 
+# Set the working directory
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Copy the entire project
+COPY . .
 
-# Install dependencies
-RUN npm install
+# Build the project in release mode
+RUN cargo build --release
+RUN ldd /app/target/release/comic-reader-server
+RUN readelf -V /app/target/release/comic-reader-server
 
-# Copy server code
-COPY server.js ./
+FROM ubuntu:oracular
 
-# Create directory for comics
-RUN mkdir -p /comics
+# Install necessary runtime dependencies
+RUN apt-get update && apt-get install -y libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
 
-# Expose port
-EXPOSE 3000
+# Copy the compiled binary from the builder stage
+COPY --from=builder /app/target/release/comic-reader-server /usr/local/bin/app
 
-CMD ["node", "server.js"]
+ENV ROCKET_ADDRESS=0.0.0.0
+ENV ROCKET_PORT=8000
+
+# Set the entrypoint
+ENTRYPOINT ["/usr/local/bin/app"]

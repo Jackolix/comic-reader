@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::future::Future;
+use std::pin::Pin;
 use tokio::fs::{self, File};
 use tokio::io::AsyncReadExt;
 use tokio::sync::RwLock;
@@ -8,61 +10,141 @@ use notify::{Watcher, RecursiveMode, Event};
 use zip::ZipArchive;
 use std::io::Cursor;
 
-use crate::models::comic::{Comic, CoverImage};
+use crate::models::comic::{Comic, CoverImage, Folder};
 use crate::models::error::ComicError;
 
 pub struct ComicService {
     comics_dir: PathBuf,
     comics_cache: Arc<RwLock<HashMap<String, Comic>>>,
     covers_cache: Arc<RwLock<HashMap<String, CoverImage>>>,
+    folder_structure: Arc<RwLock<Folder>>,
 }
 
 impl ComicService {
     pub async fn new(comics_dir: PathBuf) -> Result<Self, ComicError> {
         let comics_cache = Arc::new(RwLock::new(HashMap::new()));
         let covers_cache = Arc::new(RwLock::new(HashMap::new()));
+        let folder_structure = Arc::new(RwLock::new(Folder {
+            name: "root".to_string(),
+            path: vec![],
+            comics: vec![],
+            subfolders: vec![],
+        }));
 
         let service = ComicService {
             comics_dir,
             comics_cache,
             covers_cache,
+            folder_structure,
         };
 
         // Initial scan
         service.scan_directory().await?;
 
-        // Setup file watcher
+        // Setup file watcher with recursive mode
         service.setup_watcher()?;
 
         Ok(service)
     }
 
     async fn scan_directory(&self) -> Result<(), ComicError> {
-        let mut entries = fs::read_dir(&self.comics_dir).await?;
+        println!("\nStarting full directory scan");
         let mut new_comics = HashMap::new();
         let mut new_covers = HashMap::new();
+        let mut root_folder = Folder {
+            name: "root".to_string(),
+            path: vec![],
+            comics: vec![],
+            subfolders: vec![],
+        };
 
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if let Some(extension) = path.extension() {
-                if extension.to_string_lossy().to_lowercase() == "cbz" {
-                    let comic = self.process_comic_file(&path).await?;
-                    let cover = self.extract_cover(&path).await?;
+        // Recursive directory scanning
+        self.scan_directory_recursive(&self.comics_dir, &mut new_comics, &mut new_covers, &mut root_folder).await?;
 
-                    let comic_id = comic.id.clone();
-                    new_comics.insert(comic_id.clone(), comic);
-                    new_covers.insert(comic_id, cover);
-                }
-            }
-        }
+        println!("\nScan complete:");
+        println!("Total comics found: {}", new_comics.len());
+        println!("Root comics: {}", root_folder.comics.len());
+        println!("Root subfolders: {}", root_folder.subfolders.len());
 
         // Update caches
         let mut comics_cache = self.comics_cache.write().await;
         let mut covers_cache = self.covers_cache.write().await;
+        let mut folder_structure = self.folder_structure.write().await;
+
         *comics_cache = new_comics;
         *covers_cache = new_covers;
+        *folder_structure = root_folder;
 
         Ok(())
+    }
+
+    fn scan_directory_recursive<'a>(
+        &'a self,
+        dir: &'a Path,
+        comics: &'a mut HashMap<String, Comic>,
+        covers: &'a mut HashMap<String, CoverImage>,
+        current_folder: &'a mut Folder,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ComicError>> + Send + 'a>> {
+        Box::pin(async move {
+
+            let mut entries = fs::read_dir(dir).await?;
+
+            while let Some(entry) = entries.next_entry().await? {
+                let path = entry.path();
+
+                if path.is_dir() {
+                    let folder_name = path.file_name()
+                        .ok_or_else(|| ComicError::InvalidPath)?
+                        .to_string_lossy()
+                        .into_owned();
+
+                    let mut subfolder = Folder {
+                        name: folder_name.clone(),
+                        path: current_folder.path.iter()
+                            .cloned()
+                            .chain(std::iter::once(current_folder.name.clone()))
+                            .filter(|name| name != "root")
+                            .collect(),
+                        comics: vec![],
+                        subfolders: vec![],
+                    };
+
+                    self.scan_directory_recursive(&path, comics, covers, &mut subfolder).await?;
+
+                    if !subfolder.comics.is_empty() || !subfolder.subfolders.is_empty() {
+                        current_folder.subfolders.push(subfolder);
+                    }
+                } else if let Some(extension) = path.extension() {
+                    if extension.to_string_lossy().to_lowercase() == "cbz" {
+                        if let Some(comic) = Comic::from_path(&self.comics_dir, &path) {
+                            if let Ok(cover) = self.extract_cover(&path).await {
+                                covers.insert(comic.id.clone(), cover);
+                                comics.insert(comic.id.clone(), comic.clone());
+                                current_folder.comics.push(comic);
+                            }
+                        }
+                    }
+                }
+            }
+
+            println!("Finished scanning directory: {}", dir.display());
+            println!("Current folder {} now has {} comics and {} subfolders",
+                     current_folder.name, current_folder.comics.len(), current_folder.subfolders.len());
+
+            Ok(())
+        })
+    }
+
+    pub async fn search_comics(&self, query: &str) -> Vec<Comic> {
+        let comics_cache = self.comics_cache.read().await;
+        comics_cache.values()
+            .filter(|comic| comic.matches_search(query))
+            .cloned()
+            .collect()
+    }
+
+    pub async fn get_folder_structure(&self) -> Folder {
+        self.folder_structure.read().await.clone()
     }
 
     async fn process_comic_file(&self, path: &Path) -> Result<Comic, ComicError> {
@@ -75,14 +157,33 @@ impl ComicService {
             .to_string_lossy()
             .into_owned();
 
-        // Create the encoded path first
+        // Calculate relative path from base_dir
+        let relative_path = path.strip_prefix(&self.comics_dir)
+            .map_err(|_| ComicError::InvalidPath)?;
+        let parent_path = relative_path.parent();
+
+        // Create folder path
+        let folder_path: Vec<String> = if let Some(parent) = parent_path {
+            parent.components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect()
+        } else {
+            vec![]
+        };
+
+        // Get series name (immediate parent folder)
+        let series = folder_path.last().cloned();
+
+        // Create the encoded path
         let encoded_path = format!("/comics/{}", urlencoding::encode(&file_name));
 
         Ok(Comic {
             id: file_name.clone(),
             name,
-            file_name: file_name,  // file_name is moved here
+            file_name,
             path: encoded_path,
+            folder_path,
+            series,
         })
     }
 
@@ -112,23 +213,27 @@ impl ComicService {
         let comics_dir = self.comics_dir.clone();
         let comics_cache = self.comics_cache.clone();
         let covers_cache = self.covers_cache.clone();
+        let folder_structure = self.folder_structure.clone();
 
         let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
             if let Ok(event) = res {
                 let comics_dir = comics_dir.clone();
                 let comics_cache = comics_cache.clone();
                 let covers_cache = covers_cache.clone();
+                let folder_structure = folder_structure.clone();
 
-                tokio::spawn(async move {
+                // Create a runtime for the async operations
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.spawn(async move {
                     match event.kind {
                         notify::EventKind::Create(_) |
                         notify::EventKind::Modify(_) |
                         notify::EventKind::Remove(_) => {
-                            // Rescan directory on any change
                             let service = ComicService {
                                 comics_dir,
                                 comics_cache,
                                 covers_cache,
+                                folder_structure,
                             };
                             if let Err(e) = service.scan_directory().await {
                                 eprintln!("Error rescanning directory: {}", e);
@@ -140,7 +245,7 @@ impl ComicService {
             }
         })?;
 
-        watcher.watch(&self.comics_dir, RecursiveMode::NonRecursive)?;
+        watcher.watch(&self.comics_dir, RecursiveMode::Recursive)?;
 
         // Keep watcher alive by storing it in a thread-local or global state
         std::thread::spawn(move || {

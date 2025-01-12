@@ -24,4 +24,4 @@ dist-ssr
 *.sw?
 
 server/comics
-server/rust/target
+server/target

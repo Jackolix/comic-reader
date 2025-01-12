@@ -2,18 +2,31 @@ use rocket::State;
 use rocket::http::{Status, ContentType};
 use rocket::serde::json::Json;
 
-use crate::models::comic::Comic;
+use crate::models::comic::{Comic, Folder};
 use crate::models::error::ComicError;
 use crate::services::comic_service::ComicService;
 use crate::services::auth::AuthGuard;
 use crate::utils::response::BinaryResponse;
 
-#[get("/comics")]
+#[get("/comics?<search>")]
 pub async fn list_comics(
     _auth: AuthGuard,
-    comic_service: &State<ComicService>
+    comic_service: &State<ComicService>,
+    search: Option<String>,
 ) -> Json<Vec<Comic>> {
-    Json(comic_service.get_all_comics().await)
+    let comics = match search {
+        Some(query) => comic_service.search_comics(&query).await,
+        None => comic_service.get_all_comics().await,
+    };
+    Json(comics)
+}
+
+#[get("/folders")]
+pub async fn get_folder_structure(
+    _auth: AuthGuard,
+    comic_service: &State<ComicService>
+) -> Json<Folder> {
+    Json(comic_service.get_folder_structure().await)
 }
 
 #[get("/comics/<id>")]
@@ -74,5 +87,10 @@ pub fn cover_options(_id: String) -> Status {
 
 #[options("/comics/<_id>")]
 pub fn comic_options(_id: String) -> Status {
+    Status::NoContent
+}
+
+#[options("/folders")]
+pub fn folders_options() -> Status {
     Status::NoContent
 }
