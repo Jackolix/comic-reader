@@ -20,7 +20,8 @@ RUN apt-get update && apt-get install -y libssl-dev ca-certificates && rm -rf /v
 # Copy the compiled binary from the builder stage
 COPY --from=builder /app/target/release/comic-reader-server /usr/local/bin/app
 
-# Check the GLIBC version in the final image
-RUN ldd --version
+ENV ROCKET_ADDRESS=0.0.0.0
+ENV ROCKET_PORT=8000
+
 # Set the entrypoint
 ENTRYPOINT ["/usr/local/bin/app"]
