@@ -28,12 +28,7 @@ async fn rocket() -> rocket::Rocket<rocket::Build> {
         .await
         .expect("Failed to initialize comic service");
 
-    let figment = rocket::Config::figment()
-        .merge(("address", "0.0.0.0"))
-        .merge(("port", 8000))
-        .merge(("log_level", "normal"));
-
-    rocket::custom(figment)
+    rocket::build()
         .attach(CORS)
         .manage(config)
         .manage(comic_service)
