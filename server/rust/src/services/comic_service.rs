@@ -75,12 +75,14 @@ impl ComicService {
             .to_string_lossy()
             .into_owned();
 
-        // Store the original filename and use it as ID
+        // Create the encoded path first
+        let encoded_path = format!("/comics/{}", urlencoding::encode(&file_name));
+
         Ok(Comic {
             id: file_name.clone(),
             name,
-            file_name,
-            path: format!("/comics/{}", urlencoding::encode(&file_name)),
+            file_name: file_name,  // file_name is moved here
+            path: encoded_path,
         })
     }
 
