@@ -1,6 +1,8 @@
 use rocket::fairing::{Fairing, Info, Kind};
 use rocket::http::Header;
 use rocket::{Request, Response};
+use rocket::http::Method;
+use rocket::http::Status;
 
 pub struct CORS;
 
@@ -9,7 +11,7 @@ impl Fairing for CORS {
     fn info(&self) -> Info {
         Info {
             name: "Add CORS headers to responses",
-            kind: Kind::Response | Kind::Options
+            kind: Kind::Response
         }
     }
 
@@ -17,11 +19,13 @@ impl Fairing for CORS {
         // Add CORS headers to all responses
         response.set_header(Header::new("Access-Control-Allow-Origin", "*"));
         response.set_header(Header::new("Access-Control-Allow-Methods", "GET, POST, OPTIONS"));
-        response.set_header(Header::new("Access-Control-Allow-Headers", "Content-Type, Authorization"));
+        response.set_header(Header::new("Access-Control-Allow-Headers", "*"));
+        response.set_header(Header::new("Access-Control-Allow-Credentials", "true"));
 
         // Handle OPTIONS requests
-        if request.method() == rocket::http::Method::Options {
-            response.set_header(Header::new("Access-Control-Max-Age", "86400"));
+        if request.method() == Method::Options {
+            response.set_header(Header::new("Access-Control-Max-Age", "3600"));
+            response.set_status(Status::NoContent);
         }
     }
 }

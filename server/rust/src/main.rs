@@ -32,9 +32,13 @@ async fn rocket() -> rocket::Rocket<rocket::Build> {
         .manage(config)
         .manage(comic_service)
         .mount("/", routes![
-            routes::auth::check_auth,
-            routes::comics::list_comics,
-            routes::comics::get_cover,
-            routes::comics::get_comic,
-        ])
+        routes::auth::check_auth,
+        routes::auth::auth_check_options,
+        routes::comics::list_comics,
+        routes::comics::comics_options,
+        routes::comics::get_cover,
+        routes::comics::cover_options,
+        routes::comics::get_comic,
+        routes::comics::comic_options,
+    ])
 }

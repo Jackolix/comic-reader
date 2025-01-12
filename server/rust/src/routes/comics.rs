@@ -53,3 +53,18 @@ pub async fn get_comic(
         filename: Some(comic.file_name),
     })
 }
+
+#[options("/comics")]
+pub fn comics_options() -> Status {
+    Status::NoContent
+}
+
+#[options("/covers/<_id>")]
+pub fn cover_options(_id: String) -> Status {
+    Status::NoContent
+}
+
+#[options("/comics/<_id>")]
+pub fn comic_options(_id: String) -> Status {
+    Status::NoContent
+}
