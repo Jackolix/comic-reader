@@ -35,17 +35,19 @@ const ComicReader = () => {
         const savedPasswords = JSON.parse(localStorage.getItem('comicReaderPasswords')) || {};
         setSavedServers(servers);
         setServerPasswords(savedPasswords);
-        
+
         // Load comics sequentially to avoid race conditions
         for (const server of servers) {
-          await loadServerComics(server, savedPasswords[server]);
+          console.log('Loading comics from server:', server);
+          const password = savedPasswords[server];
+          await loadServerComics(server, password);
         }
       } catch (error) {
         console.error('Error initializing library:', error);
         setError('Failed to initialize library');
       }
     };
-    
+
     initializeLibrary();
   }, []);
 
@@ -58,28 +60,38 @@ const ComicReader = () => {
   // Load cover for a remote comic
   const loadCover = async (comic, password) => {
     if (comic.type !== 'remote' || comic.cover) return;
-    
+
     try {
       const headers = {};
-      // Use the passed password or fall back to the state
       const authPassword = password || serverPasswords[comic.serverUrl];
       if (authPassword) {
         const base64Auth = btoa(`:${authPassword}`);
         headers.Authorization = `Basic ${base64Auth}`;
       }
-  
+
       const comicId = comic.id.replace('remote-', '');
-      const response = await fetch(`${comic.serverUrl}/covers/${encodeURIComponent(comicId)}`, { headers });
-      if (!response.ok) throw new Error('Failed to load cover');
-      
-      const blob = await response.blob();
-      const coverUrl = URL.createObjectURL(blob);
-      
-      setLibrary(prev => prev.map(item => 
-        item.id === comic.id ? { ...item, cover: coverUrl } : item
+
+      // Create an img element to load the cover
+      const img = new Image();
+      const coverUrl = `${comic.serverUrl}/covers/${encodeURIComponent(comicId)}`;
+
+      // Create a promise that resolves when the image loads
+      const loadPromise = new Promise((resolve, reject) => {
+        img.onload = () => resolve(coverUrl);
+        img.onerror = () => reject(new Error(`Failed to load cover for ${comic.name}`));
+      });
+
+      // Set the src after setting up the promise
+      img.src = coverUrl;
+
+      // Wait for the image to load
+      await loadPromise;
+
+      setLibrary(prev => prev.map(item =>
+          item.id === comic.id ? { ...item, cover: coverUrl } : item
       ));
     } catch (error) {
-      console.error('Error loading cover:', error);
+      console.error(`Error loading cover for ${comic.name}:`, error);
     }
   };
 
@@ -96,83 +108,93 @@ const ComicReader = () => {
     loadCovers();
   }, [library.length]);
 
-  const loadServerComics = async (serverUrl, password) => {
+  useEffect(() => {
+    return () => {
+      images.forEach(url => {
+        if (url.startsWith('blob:')) {
+          URL.revokeObjectURL(url);
+        }
+      });
+    };
+  }, [images]);
+
+  const loadServerComics = async (serverUrl, password = null) => {
     setLoading(true);
     setError(null);
-    
+
     try {
       const normalizedUrl = serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
 
-      if (password) {
-        const headers = {
-          Authorization: `Basic ${btoa(`:${password}`)}`,
-        };
-  
-        try {
-          const response = await fetch(`${normalizedUrl}/comics`, { headers });
-          
-          if (response.status === 401) {
-            setAuthError('Invalid password');
-            return false;
-          }
-  
-          if (!response.ok) throw new Error('Could not connect to server');
-          
-          const comics = await response.json();
-          const serverComics = comics.map(comic => ({
-            id: comic.id,
-            name: comic.name,
-            type: 'remote',
-            serverUrl: normalizedUrl,
-            cover: null,
-            progress: 0
-          }));
-          
-          setLibrary(prev => {
-            const filteredLibrary = prev.filter(comic => 
-              comic.type !== 'remote' || comic.serverUrl !== normalizedUrl
-            );
-            return [...filteredLibrary, ...serverComics];
-          });
-          
-          return true;
-        } catch (error) {
-          throw error;
-        }
-      }
-  
+      // First, always check authentication requirements
       const authCheckResponse = await fetch(`${normalizedUrl}/auth/check`);
-      const { requiresPassword } = await authCheckResponse.json();
-      
-      if (requiresPassword) {
+      if (!authCheckResponse.ok) {
+        throw new Error('Could not connect to server');
+      }
+
+      const { requires_password } = await authCheckResponse.json();
+      console.log('Auth check:', { requires_password, password });
+
+      // If password is required but not provided
+      if (requires_password && !password) {
         setIsLibraryOpen(false);
+        setPendingServerUrl(normalizedUrl);
+        setIsPasswordDialogOpen(true);
+        setLoading(false);
         return 'password-required';
       }
-  
-      const response = await fetch(`${normalizedUrl}/comics`);
-      if (!response.ok) throw new Error('Could not connect to server');
-      
+
+      // Prepare headers for comic listing
+      const headers = {};
+      if (password || serverPasswords[normalizedUrl]) {
+        const authPassword = password || serverPasswords[normalizedUrl];
+        const base64Auth = btoa(`:${authPassword}`);
+        headers.Authorization = `Basic ${base64Auth}`;
+      }
+
+      // Fetch comics list
+      const response = await fetch(`${normalizedUrl}/comics`, { headers });
+
+      if (response.status === 401) {
+        setAuthError('Invalid password');
+        setIsPasswordDialogOpen(true);
+        setLoading(false);
+        return false;
+      }
+
+      if (!response.ok) {
+        throw new Error('Could not connect to server');
+      }
+
       const comics = await response.json();
       const serverComics = comics.map(comic => ({
-        id: `remote-${comic.id}`,
+        id: comic.file_name, // Use the actual filename as ID
         name: comic.name,
         type: 'remote',
         serverUrl: normalizedUrl,
-        path: comic.path,
+        path: `/comics/${encodeURIComponent(comic.file_name)}`, // Construct path here
         cover: null,
         progress: 0
       }));
-      
+
       setLibrary(prev => {
-        const filteredLibrary = prev.filter(comic => 
-          comic.type !== 'remote' || comic.serverUrl !== normalizedUrl
+        const filteredLibrary = prev.filter(comic =>
+            comic.type !== 'remote' || comic.serverUrl !== normalizedUrl
         );
         return [...filteredLibrary, ...serverComics];
       });
-      
+
+      // If we got here with a password, save it
+      if (password) {
+        setServerPasswords(prev => ({
+          ...prev,
+          [normalizedUrl]: password
+        }));
+      }
+
       return true;
     } catch (error) {
-      setError('Could not connect to server: ' + error.message);
+      console.error('Server connection error:', error);
+      setError(`Could not connect to server: ${error.message}`);
       return false;
     } finally {
       setLoading(false);
@@ -181,21 +203,10 @@ const ComicReader = () => {
 
   const handleServerAdd = async () => {
     if (!serverUrl) return;
-    
+
     try {
-      const normalizedUrl = serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
-      const authCheckResponse = await fetch(`${normalizedUrl}/auth/check`);
-      const { requiresPassword } = await authCheckResponse.json();
-      
-      if (requiresPassword && !serverPasswords[serverUrl]) {
-        setPendingServerUrl(serverUrl);
-        setIsServerDialogOpen(false);
-        setIsPasswordDialogOpen(true);
-        return;
-      }
-      
       const result = await loadServerComics(serverUrl);
-      
+
       if (result === true) {
         if (!savedServers.includes(serverUrl)) {
           setSavedServers(prev => [...prev, serverUrl]);
@@ -211,54 +222,16 @@ const ComicReader = () => {
 
   const handlePasswordSubmit = async (password) => {
     setAuthError('');
-    
+
     try {
-      const normalizedUrl = pendingServerUrl.endsWith('/') ? pendingServerUrl.slice(0, -1) : pendingServerUrl;
-      const headers = {
-        Authorization: `Basic ${btoa(`:${password}`)}`
-      };
-  
-      const response = await fetch(`${normalizedUrl}/comics`, { headers });
-      
-      if (response.status === 401) {
-        setAuthError('Invalid password');
-        return;
+      const result = await loadServerComics(pendingServerUrl, password);
+
+      if (result === true) {
+        setIsPasswordDialogOpen(false);
+        setPendingServerUrl('');
+        setServerUrl('');
+        setIsServerDialogOpen(false);
       }
-  
-      if (!response.ok) throw new Error('Could not connect to server');
-      
-      const comics = await response.json();
-      setServerPasswords(prev => ({
-        ...prev,
-        [pendingServerUrl]: password
-      }));
-      
-      if (!savedServers.includes(pendingServerUrl)) {
-        setSavedServers(prev => [...prev, pendingServerUrl]);
-      }
-  
-      const serverComics = comics.map(comic => ({
-        id: `remote-${comic.id}`,
-        name: comic.name,
-        type: 'remote',
-        serverUrl: normalizedUrl,
-        path: comic.path,
-        cover: null,
-        progress: 0
-      }));
-      
-      setLibrary(prev => {
-        const filteredLibrary = prev.filter(comic => 
-          comic.type !== 'remote' || comic.serverUrl !== normalizedUrl
-        );
-        return [...filteredLibrary, ...serverComics];
-      });
-  
-      setIsPasswordDialogOpen(false);
-      setPendingServerUrl('');
-      setServerUrl('');
-      setIsServerDialogOpen(false);
-      
     } catch (error) {
       setError('Could not connect to server: ' + error.message);
     }
@@ -376,6 +349,48 @@ const ComicReader = () => {
     }
     setLoading(false);
   };
+
+  const loadCoverWithRetry = async (comic, password, retries = 3) => {
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        await loadCover(comic, password);
+        return; // Success, exit the function
+      } catch (error) {
+        console.warn(`Attempt ${attempt + 1} failed to load cover for ${comic.name}:`, error);
+        if (attempt === retries - 1) {
+          // Last attempt failed
+          console.error(`Failed to load cover for ${comic.name} after ${retries} attempts`);
+        } else {
+          // Wait before retrying (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+        }
+      }
+    }
+  };
+
+// Update the useEffect that loads covers
+  useEffect(() => {
+    const loadCovers = async () => {
+      const savedPasswords = JSON.parse(localStorage.getItem('comicReaderPasswords')) || {};
+
+      // Load covers in batches to prevent overwhelming the server
+      const batchSize = 5;
+      const comicsNeedingCovers = library.filter(comic =>
+          comic.type === 'remote' && !comic.cover
+      );
+
+      for (let i = 0; i < comicsNeedingCovers.length; i += batchSize) {
+        const batch = comicsNeedingCovers.slice(i, i + batchSize);
+        await Promise.all(
+            batch.map(comic =>
+                loadCoverWithRetry(comic, savedPasswords[comic.serverUrl])
+            )
+        );
+      }
+    };
+
+    loadCovers();
+  }, [library.length]);
 
   // Password dialog component
   const PasswordDialog = ({ onSubmit, onCancel, isOpen }) => {
@@ -564,22 +579,23 @@ const ComicReader = () => {
                 >
                   <CardContent className="p-4 flex gap-4">
                     {item.cover ? (
-                      <img 
-                        src={item.cover} 
-                        alt={`Cover of ${item.name}`}
-                        className="w-20 h-28 object-cover rounded-sm"
-                        onError={(e) => {
-                          console.error('Error loading cover for:', item.name);
-                          e.target.style.display = 'none';
-                          e.target.nextSibling.style.display = 'flex';
-                        }}
-                      />
+                        <img
+                            src={item.cover}
+                            alt={`Cover of ${item.name}`}
+                            className="w-20 h-28 object-cover rounded-sm"
+                            onError={(e) => {
+                              console.error('Error loading cover for:', item.name);
+                              e.target.style.display = 'none';
+                              e.target.nextSibling.style.display = 'flex';
+                            }}
+                            crossOrigin="anonymous"  // Add this line
+                        />
                     ) : (
-                      <div className={`w-20 h-28 rounded-sm flex items-center justify-center p-1 ${
-                        theme === 'dark' ? 'bg-[#1a2234]' : 'bg-slate-200'
-                      }`}>
+                        <div className={`w-20 h-28 rounded-sm flex items-center justify-center p-1 ${
+                            theme === 'dark' ? 'bg-[#1a2234]' : 'bg-slate-200'
+                        }`}>
                         <span className={`text-xs ${
-                          theme === 'dark' ? 'text-slate-300' : 'text-slate-500'
+                            theme === 'dark' ? 'text-slate-300' : 'text-slate-500'
                         }`}>No cover found</span>
                       </div>
                     )}
