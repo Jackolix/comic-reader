@@ -264,14 +264,12 @@ impl ComicService {
     }
 
     pub async fn get_comic(&self, id: &str) -> Option<Comic> {
-        // If the id contains a folder path, extract just the filename
         let actual_id = if id.contains('/') {
             id.split('/').last()?
         } else {
             id
         };
     
-        // Try both encoded and decoded versions of the ID
         let cache = self.comics_cache.read().await;
         cache.get(actual_id)
             .or_else(|| {
@@ -295,19 +293,35 @@ impl ComicService {
     }
 
     pub async fn get_comic_data(&self, id: &str) -> Result<Vec<u8>, ComicError> {
-        // Decode the ID to get the original filename
-        let decoded_id = urlencoding::decode(id)
+        // Extract the folder path and filename
+        let (folder_path, filename) = if id.contains('/') {
+            let parts: Vec<&str> = id.rsplitn(2, '/').collect();
+            if parts.len() == 2 {
+                (Some(parts[1]), parts[0])
+            } else {
+                (None, id)
+            }
+        } else {
+            (None, id)
+        };
+    
+        // Decode the filename to get the original filename
+        let decoded_filename = urlencoding::decode(filename)
             .map_err(|_| ComicError::InvalidPath)?;
-    
-        let comic = self.get_comic(&decoded_id).await
+        
+        let comic = self.get_comic(&decoded_filename).await
             .ok_or(ComicError::ComicNotFound)?;
-    
+        
         // Construct the full path including any folders
         let mut file_path = self.comics_dir.clone();
         
-        // Add folder path components if they exist
-        for folder in &comic.folder_path {
+        // Add folder path if it exists either from the URL or from the comic metadata
+        if let Some(folder) = folder_path {
             file_path.push(folder);
+        } else if !comic.folder_path.is_empty() {
+            for folder in &comic.folder_path {
+                file_path.push(folder);
+            }
         }
         
         // Add the actual file name
