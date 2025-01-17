@@ -264,15 +264,30 @@ impl ComicService {
     }
 
     pub async fn get_comic(&self, id: &str) -> Option<Comic> {
-        // Try both encoded and decoded versions of the ID
+        println!("get_comic called with id: {}", id);
+        
+        let actual_id = if id.contains('/') {
+            let filename = id.split('/').last()?;
+            println!("Split filename: {}", filename);
+            filename
+        } else {
+            println!("Using id as-is: {}", id);
+            id
+        };
+    
         let cache = self.comics_cache.read().await;
-        cache.get(id)
+        println!("Cache keys: {:?}", cache.keys().collect::<Vec<_>>());
+        
+        let result = cache.get(actual_id)
             .or_else(|| {
-                urlencoding::decode(id)
+                urlencoding::decode(actual_id)
                     .ok()
                     .and_then(|decoded| cache.get(decoded.as_ref()))
             })
-            .cloned()
+            .cloned();
+            
+        println!("Found in cache: {}", result.is_some());
+        result
     }
 
     pub async fn get_cover(&self, id: &str) -> Option<CoverImage> {
@@ -288,25 +303,51 @@ impl ComicService {
     }
 
     pub async fn get_comic_data(&self, id: &str) -> Result<Vec<u8>, ComicError> {
-        // Decode the ID to get the original filename
-        let decoded_id = urlencoding::decode(id)
+        // Extract the folder path and filename
+        let (folder_path, filename) = if id.contains('/') {
+            let parts: Vec<&str> = id.rsplitn(2, '/').collect();
+            if parts.len() == 2 {
+                (Some(parts[1]), parts[0])
+            } else {
+                (None, id)
+            }
+        } else {
+            (None, id)
+        };
+    
+        // Decode the filename to get the original filename
+        let decoded_filename = urlencoding::decode(filename)
             .map_err(|_| ComicError::InvalidPath)?;
-
-        let comic = self.get_comic(&decoded_id).await
+        
+        let comic = self.get_comic(&decoded_filename).await
             .ok_or(ComicError::ComicNotFound)?;
-
-        let file_path = self.comics_dir.join(&comic.file_name);
+        
+        // Construct the full path including any folders
+        let mut file_path = self.comics_dir.clone();
+        
+        // Add folder path if it exists either from the URL or from the comic metadata
+        if let Some(folder) = folder_path {
+            file_path.push(folder);
+        } else if !comic.folder_path.is_empty() {
+            for folder in &comic.folder_path {
+                file_path.push(folder);
+            }
+        }
+        
+        // Add the actual file name
+        file_path.push(&comic.file_name);
+    
         println!("Attempting to read comic from: {}", file_path.display());
-
+    
         let mut file = File::open(&file_path).await
             .map_err(|e| {
                 println!("Failed to open file: {}", e);
                 ComicError::IoError(e)
             })?;
-
+    
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer).await?;
-
+    
         Ok(buffer)
     }
 }
