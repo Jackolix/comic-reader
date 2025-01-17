@@ -264,11 +264,18 @@ impl ComicService {
     }
 
     pub async fn get_comic(&self, id: &str) -> Option<Comic> {
+        // If the id contains a folder path, extract just the filename
+        let actual_id = if id.contains('/') {
+            id.split('/').last()?
+        } else {
+            id
+        };
+    
         // Try both encoded and decoded versions of the ID
         let cache = self.comics_cache.read().await;
-        cache.get(id)
+        cache.get(actual_id)
             .or_else(|| {
-                urlencoding::decode(id)
+                urlencoding::decode(actual_id)
                     .ok()
                     .and_then(|decoded| cache.get(decoded.as_ref()))
             })
@@ -297,14 +304,16 @@ impl ComicService {
     
         // Construct the full path including any folders
         let mut file_path = self.comics_dir.clone();
+        
         // Add folder path components if they exist
         for folder in &comic.folder_path {
             file_path.push(folder);
         }
+        
         // Add the actual file name
         file_path.push(&comic.file_name);
     
-        println!("Full comic path: {}", file_path.display());
+        println!("Attempting to read comic from: {}", file_path.display());
     
         let mut file = File::open(&file_path).await
             .map_err(|e| {
