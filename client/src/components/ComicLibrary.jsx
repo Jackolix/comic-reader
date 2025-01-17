@@ -111,23 +111,20 @@ const FolderTree = ({ folder, onComicSelect, theme, level = 0, searchQuery = '' 
 
 const ComicLibrary = ({ library, onComicSelect, theme }) => {
   const [searchQuery, setSearchQuery] = useState('');
-
+  
   const buildFolderStructure = (comics) => {
     const root = {
       name: 'Library',
       path: [],
-      comics: [],
+      comics: [], // Root folder won't contain comics directly anymore
       subfolders: []
     };
 
     // First sort comics between root and folders
     comics.forEach(comic => {
-      if (!comic.folder_path || comic.folder_path.length === 0) {
-        // Comics with no folder path go directly in root
-        root.comics.push(comic);
-      } else {
+      if (comic.folder_path && comic.folder_path.length > 0) {
         let currentFolder = root;
-
+        
         // Navigate or create folder path
         for (const folderName of comic.folder_path) {
           let folder = currentFolder.subfolders.find(f => f.name === folderName);
@@ -153,81 +150,95 @@ const ComicLibrary = ({ library, onComicSelect, theme }) => {
     };
     sortComics(root);
 
-    return root;
+    return {
+      structure: root,
+      rootComics: comics.filter(comic => !comic.folder_path || comic.folder_path.length === 0)
+        .sort((a, b) => a.name.localeCompare(b.name))
+    };
   };
 
-  const folderStructure = buildFolderStructure(library);
-  console.log('Folder structure:', folderStructure); // Debug log
+  const { structure: folderStructure, rootComics } = buildFolderStructure(library);
 
+  const matchesSearch = (comic) => {
+    const query = searchQuery.toLowerCase();
+    return comic.name.toLowerCase().includes(query) ||
+           (comic.series && comic.series.toLowerCase().includes(query)) ||
+           (comic.folder_path && comic.folder_path.some(folder => 
+             folder.toLowerCase().includes(query)
+           ));
+  };
+
+  // Filter root comics based on search
+  const filteredRootComics = rootComics.filter(matchesSearch);
 
   return (
-      <div className="space-y-4">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-4 w-4" />
-          <Input
-              type="text"
-              placeholder="Search comics and folders..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className={`pl-10 ${
-                  theme === 'dark'
-                      ? 'bg-[#2a324a] border-[#3a4258] text-white placeholder-slate-400'
-                      : ''
-              }`}
-          />
-        </div>
-
-        {/* Render root level comics first */}
-        {folderStructure.comics.length > 0 && (
-            <div className="mb-4">
-              {folderStructure.comics.map((comic) => (
-                  <Card
-                      key={comic.id}
-                      className={`cursor-pointer mb-2 ${
-                          theme === 'dark'
-                              ? 'bg-[#2a324a] hover:bg-[#3a4258] border-[#3a4258]'
-                              : 'hover:bg-slate-100'
-                      }`}
-                      onClick={() => onComicSelect(comic)}
-                  >
-                    <CardContent className="p-4 flex gap-4">
-                      {comic.cover ? (
-                          <img
-                              src={comic.cover}
-                              alt={`Cover of ${comic.name}`}
-                              className="w-20 h-28 object-cover rounded-sm"
-                              onError={(e) => {
-                                e.target.style.display = 'none';
-                                e.target.nextSibling.style.display = 'flex';
-                              }}
-                              crossOrigin="anonymous"
-                          />
-                      ) : (
-                          <div className={`w-20 h-28 rounded-sm flex items-center justify-center p-1 ${
-                              theme === 'dark' ? 'bg-[#1a2234]' : 'bg-slate-200'
-                          }`}>
-                            <span className="text-xs text-slate-500">No cover</span>
-                          </div>
-                      )}
-                      <div>
-                        <div className={`font-medium ${
-                            theme === 'dark' ? 'text-white' : ''
-                        }`}>{comic.name}</div>
-                      </div>
-                    </CardContent>
-                  </Card>
-              ))}
-            </div>
-        )}
-
-        {/* Then render folders */}
-        <FolderTree
-            folder={folderStructure}
-            onComicSelect={onComicSelect}
-            theme={theme}
-            searchQuery={searchQuery}
+    <div className="space-y-4">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-4 w-4" />
+        <Input
+          type="text"
+          placeholder="Search comics and folders..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className={`pl-10 ${
+            theme === 'dark' 
+              ? 'bg-[#2a324a] border-[#3a4258] text-white placeholder-slate-400' 
+              : ''
+          }`}
         />
       </div>
+      
+      {/* Render root level comics first */}
+      {filteredRootComics.length > 0 && (
+        <div className="mb-4">
+          {filteredRootComics.map((comic) => (
+            <Card 
+              key={comic.id} 
+              className={`cursor-pointer mb-2 ${
+                theme === 'dark' 
+                  ? 'bg-[#2a324a] hover:bg-[#3a4258] border-[#3a4258]' 
+                  : 'hover:bg-slate-100'
+              }`} 
+              onClick={() => onComicSelect(comic)}
+            >
+              <CardContent className="p-4 flex gap-4">
+                {comic.cover ? (
+                  <img
+                    src={comic.cover}
+                    alt={`Cover of ${comic.name}`}
+                    className="w-20 h-28 object-cover rounded-sm"
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                      e.target.nextSibling.style.display = 'flex';
+                    }}
+                    crossOrigin="anonymous"
+                  />
+                ) : (
+                  <div className={`w-20 h-28 rounded-sm flex items-center justify-center p-1 ${
+                    theme === 'dark' ? 'bg-[#1a2234]' : 'bg-slate-200'
+                  }`}>
+                    <span className="text-xs text-slate-500">No cover</span>
+                  </div>
+                )}
+                <div>
+                  <div className={`font-medium ${
+                    theme === 'dark' ? 'text-white' : ''
+                  }`}>{comic.name}</div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Then render folders */}
+      <FolderTree
+        folder={folderStructure}
+        onComicSelect={onComicSelect}
+        theme={theme}
+        searchQuery={searchQuery}
+      />
+    </div>
   );
 };
 
