@@ -263,20 +263,15 @@ impl ComicService {
             .collect()
     }
 
-    pub async fn get_comic(&self, id: &str) -> Option<Comic> {
-        println!("get_comic called with id: {}", id);
-        
+    pub async fn get_comic(&self, id: &str) -> Option<Comic> {        
         let actual_id = if id.contains('/') {
             let filename = id.split('/').last()?;
-            println!("Split filename: {}", filename);
             filename
         } else {
-            println!("Using id as-is: {}", id);
             id
         };
     
         let cache = self.comics_cache.read().await;
-        println!("Cache keys: {:?}", cache.keys().collect::<Vec<_>>());
         
         let result = cache.get(actual_id)
             .or_else(|| {
@@ -286,7 +281,6 @@ impl ComicService {
             })
             .cloned();
             
-        println!("Found in cache: {}", result.is_some());
         result
     }
 
