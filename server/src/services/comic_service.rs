@@ -291,22 +291,30 @@ impl ComicService {
         // Decode the ID to get the original filename
         let decoded_id = urlencoding::decode(id)
             .map_err(|_| ComicError::InvalidPath)?;
-
+    
         let comic = self.get_comic(&decoded_id).await
             .ok_or(ComicError::ComicNotFound)?;
-
-        let file_path = self.comics_dir.join(&comic.file_name);
-        println!("Attempting to read comic from: {}", file_path.display());
-
+    
+        // Construct the full path including any folders
+        let mut file_path = self.comics_dir.clone();
+        // Add folder path components if they exist
+        for folder in &comic.folder_path {
+            file_path.push(folder);
+        }
+        // Add the actual file name
+        file_path.push(&comic.file_name);
+    
+        println!("Full comic path: {}", file_path.display());
+    
         let mut file = File::open(&file_path).await
             .map_err(|e| {
                 println!("Failed to open file: {}", e);
                 ComicError::IoError(e)
             })?;
-
+    
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer).await?;
-
+    
         Ok(buffer)
     }
 }
