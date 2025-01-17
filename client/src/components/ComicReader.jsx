@@ -354,9 +354,12 @@ const ComicReader = () => {
           headers.Accept = 'application/zip';
         }
 
-        const comicId = comic.id.replace('remote-', '');
-        const url = `${comic.serverUrl}/comics/${encodeURIComponent(comicId)}`;
-        console.log('Fetching comic from:', url);
+      const comicId = comic.id.replace('remote-', '');
+      const folderPath = comic.folder_path && comic.folder_path.length > 0 
+        ? comic.folder_path.join('/') + '/' 
+        : '';
+      const url = `${comic.serverUrl}/comics/${encodeURIComponent(folderPath + comicId)}`;
+      console.log('Fetching comic from:', url);
 
         const response = await fetch(url, { headers });
 
