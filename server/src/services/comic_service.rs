@@ -264,20 +264,30 @@ impl ComicService {
     }
 
     pub async fn get_comic(&self, id: &str) -> Option<Comic> {
+        println!("get_comic called with id: {}", id);
+        
         let actual_id = if id.contains('/') {
-            id.split('/').last()?
+            let filename = id.split('/').last()?;
+            println!("Split filename: {}", filename);
+            filename
         } else {
+            println!("Using id as-is: {}", id);
             id
         };
     
         let cache = self.comics_cache.read().await;
-        cache.get(actual_id)
+        println!("Cache keys: {:?}", cache.keys().collect::<Vec<_>>());
+        
+        let result = cache.get(actual_id)
             .or_else(|| {
                 urlencoding::decode(actual_id)
                     .ok()
                     .and_then(|decoded| cache.get(decoded.as_ref()))
             })
-            .cloned()
+            .cloned();
+            
+        println!("Found in cache: {}", result.is_some());
+        result
     }
 
     pub async fn get_cover(&self, id: &str) -> Option<CoverImage> {
