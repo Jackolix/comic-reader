@@ -56,15 +56,15 @@ services:
     restart: unless-stopped
 
   comic-server:
-    image: ghcr.io/jackolix/comic-server:latest
+    image: ghcr.io/jackolix/comic-rust-server:latest
     volumes:
       - ./comics:/comics
     environment:
       - COMICS_DIR=/comics
+      - ROCKET_ADDRESS=0.0.0.0
       - SERVER_PASSWORD=your_secure_password #optional
-      - PORT=3000 #default is 3000
     ports:
-      - "3000:3000"
+      - "8000:8000"
     restart: unless-stopped
 ```
 
